@@ -1,15 +1,21 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
+from boomerang_config import BoomerangConfig
 
 
-def simulate_projectile(position_init, vitesse_init, dt=0.01, t_max=5):
+def simulate_projectile(position_init, vitesse_init, config, dt=0.01, t_max=5):
   position = position_init.copy()
   vitesse = vitesse_init.copy()
   t = 0
   Px, Py, Pz = [], [], []
   R_rot,R_omega=[],[]
-  g = -9.81
+  g=-9.81
+  
+  '''Forces'''
+  F_gravite=np.array([0,0,-config.m])
+  F_tot=F_gravite #+F_portance+F_trainee...
+  
   #j'ai considéré le boomerang perpendiculaire par rapport au sol
   # donc lors du lancer il est tourné de 90deg selon x (avec x vers l'avant, y vers la gauche et z vers le haut) 
   # référentiel cartésien fixe dans le Référentiel terrestre (que je suppose à ce stade comme galiléen)

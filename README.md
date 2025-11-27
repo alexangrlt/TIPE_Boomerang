@@ -7,6 +7,3 @@ Supervisé par M. Cordel, Professeur de Physique-Chimie, en MP, au lycée Alain 
 
 ## Installation
 ```pip install -r requirements.txt```
-
-## Utilisation
-Je mettrais les instructions d'utilisation ici (surement le premier weekend des vacances de la Toussaint)

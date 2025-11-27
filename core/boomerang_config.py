@@ -28,3 +28,5 @@ class BoomerangConfig:
   def surface(self):
     """surface totale du boomerang"""
     return self.L * self.l *2 #calcul de surface, en m²
+  
+Boomerang_standard=BoomerangConfig()
