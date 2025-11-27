@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
-from boomerang_config import BoomerangConfig
+from core.boomerang_config import BoomerangConfig
 
 
 def simulate_projectile(position_init, vitesse_init, config, dt=0.01, t_max=5):
@@ -10,10 +10,10 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.01, t_max=5):
   t = 0
   Px, Py, Pz = [], [], []
   R_rot,R_omega=[],[]
-  g=-9.81
+  g=9.81
   
   '''Forces'''
-  F_gravite=np.array([0,0,-config.m])
+  F_gravite=np.array([0,0,-config.masse*g])
   F_tot=F_gravite #+F_portance+F_trainee...
   
   #j'ai considéré le boomerang perpendiculaire par rapport au sol
@@ -26,7 +26,8 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.01, t_max=5):
     Px.append(position[0])
     Py.append(position[1])
     Pz.append(position[2])
-    vitesse = [vitesse[0], vitesse[1], vitesse[2] + g*dt]
+    acceleration=F_tot / config.masse
+    vitesse += acceleration*dt
     position = [position[0] + vitesse[0]*dt, position[1] + vitesse[1]*dt, position[2] + vitesse[2]*dt]
     R_rot.append(rot_current.as_rotvec())
     rot_increment=R.from_rotvec(omega*dt)

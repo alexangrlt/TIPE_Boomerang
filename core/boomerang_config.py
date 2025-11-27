@@ -17,7 +17,7 @@ class BoomerangConfig:
   h=0.004 #epaisseur de pale en m
   
   #Masse
-  m=0.08 #masse en kg
+  masse=0.028 #masse en kg #masse de mon 4eme boomerang (1000%, 100% infill (triangles), 3h40 d'impression)
   
   @property
   def envergure(self):
