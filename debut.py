@@ -20,18 +20,22 @@ while t < t_tot and position[2] > 0:
     Px.append(position[0])
     Py.append(position[1])
     Pz.append(position[2])
-    
+
     # Calculs physiques
-    vitesse = [vitesse[0], vitesse[1], vitesse[2] + g*dt]
-    position = [position[0] + vitesse[0]*dt, position[1] + vitesse[1]*dt, position[2] + vitesse[2]*dt]
-    
+    vitesse = [vitesse[0], vitesse[1], vitesse[2] + g * dt]
+    position = [
+        position[0] + vitesse[0] * dt,
+        position[1] + vitesse[1] * dt,
+        position[2] + vitesse[2] * dt,
+    ]
+
     t += dt
 
 # Plot
 fig = plt.figure()
-ax = fig.add_subplot(projection='3d')
+ax = fig.add_subplot(projection="3d")
 ax.plot(Px, Py, Pz)
-ax.set_xlabel('X (m)')
-ax.set_ylabel('Y (m)')
-ax.set_zlabel('Z (m)')
+ax.set_xlabel("X (m)")
+ax.set_ylabel("Y (m)")
+ax.set_zlabel("Z (m)")
 plt.show()
