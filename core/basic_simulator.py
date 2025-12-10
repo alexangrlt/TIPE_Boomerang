@@ -1,7 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
-from core import BoomerangConfig
+from core.boomerang_config import BoomerangConfig
 
 
 def simulate_projectile(position_init, vitesse_init, config, dt=0.01, t_max=5):
@@ -60,3 +60,24 @@ def plot_trajectory_3d(Px, Py, Pz, title="Trajectoire du Projectile"):
 	ax.set_zlabel('Z (m)')
 	ax.set_title(title)
 	plt.show()
+
+
+def plot_angles(rotation, dt):
+    #Conversion de la liste rotation en 'objet' rotations
+    rotations=[R.from_rotvec(vec) for vec in rotation]
+
+	#Conversion de l'objet rotations en angle dans xyz (orientation)
+    angles=np.array([r.as_euler('xyz', degrees=True) for r in rotations])
+    nb_points=len(rotation)
+    t=np.arange(nb_points)*dt
+    
+    plt.figure()
+    plt.plot(t,angles[:,0], label="Angle X (roulis (si je ne me trompe pas))")
+    plt.plot(t,angles[:,1], label="Angle Y (tangage)")
+    plt.plot(t,angles[:,2], label="Angle Z (lacet ?)")
+    
+    plt.xlabel('Temps (en s)')
+    plt.ylabel('Angle (en degrés)')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
