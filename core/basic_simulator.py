@@ -19,6 +19,8 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.01, t_max=5):
     # j'ai considéré le boomerang perpendiculaire par rapport au sol
     # donc lors du lancer il est tourné de 90deg selon x (avec x vers l'avant, y vers la gauche et z vers le haut)
     # référentiel cartésien fixe dans le Référentiel terrestre (que je suppose à ce stade comme galiléen)
+    # je vais surement mettre y vers l'avant et x vers la droite car toutes les sources/recherches que j'ai sur le 
+    # boomerang mettent y vers l'avant (ça facilitera l'accroche que j'ai avec mes sources)
     rot_current = R.from_rotvec([np.pi / 2, 0, 0])
     omega = np.array([0, 8, 0])  # on considère une vitesse angulaire constante ici
 
