@@ -6,9 +6,7 @@ from dataclasses import dataclass
 import numpy as np
 
 
-@dataclass(
-    frozen=True
-)  # immutables
+@dataclass(frozen=True)  # immutables
 class BoomerangConfig:
     """Settings Boomerang 2 pales (rectangulaires)"""
 
@@ -24,8 +22,8 @@ class BoomerangConfig:
     rho = 1.225  # densité de l'air en kg/m³
     Cx = 1.5  # coefficient de traînée                         #Je ne trouve aucune source donnant Cx (pour tester) donc en premiere approche j'ai pris le Cx de Corentin
     Cz = 0.45  # coefficient de portance initial               #https://www.math.uci.edu/~eesser/papers/justboom.pdf  ##y a un calcul a faire (ou plutot une experience....)
-    Cm= ........ # coefficient de Magnus                       #je n'ai trouvé nulle part une valeur qui pourrait correspondre a mon boomerang et/ou un calcul pour arriver a cette valeur car elle se trouve par l'experience...
-    
+    Cm = 0.05  # coefficient de Magnus          #0.05 juste pr lancer la simu mais :je n'ai trouvé nulle part une valeur qui pourrait correspondre a mon boomerang et/ou un calcul pour arriver a cette valeur car elle se trouve par l'experience...
+
     @property
     def envergure(self):
         """envergure du boomerang"""

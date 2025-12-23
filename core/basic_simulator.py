@@ -15,7 +15,7 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.001, t_max=20)
 
     # j'ai considéré le boomerang a 25° p/r a la normale au sol (z)
     # donc 65° p/r a x (avec x vers l'avant, y vers la gauche et z vers le haut)
-    # repère cartésien fixe dans le Référentiel terrestre (que je suppose à ce stade comme galiléen)
+
     rot_current = R.from_rotvec([65 * np.pi / 180, 0, 0])
     omega = np.array([0, 8, 0])  # on considère une vitesse angulaire constante ici
 
@@ -36,7 +36,9 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.001, t_max=20)
             * np.linalg.norm(vitesse) ** 2
             * Boomerang_standard.surface()
             * config.Cz
-        ) * rot_current.apply([0, 0, 1])
+        ) * rot_current.apply(
+            [0, 0, 1]
+        )  # prcq ça dépend de l'inclinaison (donc rotation) du boomerang
 
         if np.linalg.norm(vitesse) > 0:
             F_trainee = (
