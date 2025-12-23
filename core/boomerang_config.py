@@ -13,13 +13,18 @@ class BoomerangConfig:
     """Settings Boomerang 2 pales (rectangulaires)"""
 
     # Parametres Geometriques
-    L = 0.4  # longueur de pale en m
-    l = 0.04  # largeur de pale en m
-    h = 0.004  # epaisseur de pale en m
+    L = 0.195  # longueur de pale en m
+    l = 0.034  # largeur de pale en m
+    h = 0.0031  # epaisseur de pale en m
 
     # Masse
-    masse = 0.028  # masse en kg #masse de mon 4eme boomerang (1000%, 100% infill (triangles), 3h40 d'impression)
+    masse = 0.028  # masse en kg #masse de mon 4eme boomerang (1000%, 100% infill (triangles), 3h40 d'impression, PLA)
 
+    # Parametres Aerodynamiques
+    rho = 1.225  # densité de l'air en kg/m³
+    Cx = 1.5  # coefficient de traînée                         #Je ne trouve aucune source donnant Cx (pour tester) donc en premiere approche j'ai pris le Cx de Corentin
+    Cz = 0.45  # coefficient de portance de base                #https://www.math.uci.edu/~eesser/papers/justboom.pdf  ##y a un calcul a faire
+    
     @property
     def envergure(self):
         """envergure du boomerang"""

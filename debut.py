@@ -6,7 +6,7 @@ position = [0, 0, 10]  # x, y, z
 vitesse = [5, 2, 0]
 
 g = -9.81  # gravité en m/s^2
-dt = 0.01  # pas de temps en secondes
+dt = 0.001  # pas de temps en secondes
 t_tot = 5  # durée totale en secondes
 
 Px = []
@@ -16,7 +16,7 @@ Pz = []
 t = 0
 
 while t < t_tot and position[2] > 0:
-    # Stockage AVANT calcul (pour avoir la position initiale)
+    # Stockage AVANT calcul sinon on ecrase les pos init
     Px.append(position[0])
     Py.append(position[1])
     Pz.append(position[2])
