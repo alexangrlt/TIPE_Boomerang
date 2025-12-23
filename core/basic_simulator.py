@@ -28,7 +28,7 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.001, t_max=20)
         Pz.append(position[2])
         """Forces"""
         F_gravite = np.array([0, 0, -config.masse * g])
-        F_magnus = 0.1 * np.cross(omega, vitesse)
+        F_magnus = config.Cm * np.cross(omega, vitesse)
         F_portance = (
             1
             / 2
