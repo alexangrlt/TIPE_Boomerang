@@ -1,7 +1,17 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
+from scipy.interpolate import (
+    interp1d,
+)  # je vais en avoir besoin pr remplir le vide entre les valeurs que va me donner XFLR
 from core.boomerang_config import Boomerang_standard, BoomerangConfig
+
+# ! mettre en place les tronçons, appliquer les forces dessus + calculs moments
+# mais je galere vrmt a decouper le boomerang en troncon...
+# prcq il n'est pas plein dans le sens où si je fais des petits cercles depuis le centre, j'ai pas mal de vide a des moments...
+# ? mais mon idée à l'air d'être un "blade element theory" https://en.wikipedia.org/wiki/Blade_element_theory
+# je vais voir si j'ai une idée sinon je demande de l'aide
+# je me suis précipité sur cette idée mais je bloque...
 
 
 def simulate_projectile(position_init, vitesse_init, config, dt=0.001, t_max=20):
@@ -13,8 +23,8 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.001, t_max=20)
     R_rot, R_omega = [], []
     g = 9.81
 
-    # j'ai considéré le boomerang a 25° p/r a la normale au sol (z)
-    # donc 65° p/r a x (avec x vers l'avant, y vers la gauche et z vers le haut)
+    # ? j'ai considéré le boomerang a 25° p/r a la normale au sol (z)
+    # ? donc 65° p/r a x (avec x vers l'avant, y vers la gauche et z vers le haut)
 
     rot_current = R.from_rotvec([65 * np.pi / 180, 0, 0])
     omega = np.array([0, 8, 0])  # on considère une vitesse angulaire constante ici
@@ -28,35 +38,36 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.001, t_max=20)
         Pz.append(position[2])
         """Forces"""
         F_gravite = np.array([0, 0, -config.masse * g])
-        F_magnus = config.Cm * np.cross(omega, vitesse)
-        F_portance = (
-            1
-            / 2
-            * config.rho
-            * np.linalg.norm(vitesse) ** 2
-            * Boomerang_standard.surface()
-            * config.Cz
-        ) * rot_current.apply(
-            [0, 0, 1]
-        )  # prcq ça dépend de l'inclinaison (donc rotation) du boomerang
+        # F_magnus = config.Cm * np.cross(omega, vitesse)
+        # F_portance = (
+        #     0.5
+        #     * config.rho
+        #     * np.linalg.norm(vitesse) ** 2
+        #     * Boomerang_standard.surface()
+        #     * config.Cz
+        # ) * rot_current.apply(
+        #     [0, 0, 1]
+        # )  # prcq ça dépend de l'inclinaison (donc rotation) du boomerang
 
-        if np.linalg.norm(vitesse) > 0:
-            F_trainee = (
-                -1
-                / 2
-                * config.rho
-                * np.linalg.norm(vitesse) ** 2
-                * Boomerang_standard.surface()
-                * config.Cx
-                * (
-                    vitesse / np.linalg.norm(vitesse)
-                )  # pour avoir le sens de la force (le vecteur)
-            )
+        # if np.linalg.norm(vitesse) > 0:
+        #     F_trainee = (
+        #         -0.5
+        #         * config.rho
+        #         * np.linalg.norm(vitesse) ** 2
+        #         * Boomerang_standard.surface()
+        #         * config.Cx
+        #         * (
+        #             vitesse / np.linalg.norm(vitesse)
+        #         )  # pour avoir le sens de la force (le vecteur)
+        #     )
 
-        else:
-            F_trainee = np.array([0, 0, 0])
+        # else:
+        #     F_trainee = np.array([0, 0, 0])
 
-        F_tot = F_gravite + F_magnus + F_portance + F_trainee
+        # F_tot = F_gravite + F_magnus + F_portance + F_trainee
+        F_tot = F_gravite  #! +  F_totPale
+        # ? je dois faire un F_totPale qui est la somme de mes F_troncon.
+        # ? sauf que je galere a faire mon decoupage en troncons...
         acceleration = F_tot / config.masse
 
         vitesse += acceleration * dt
@@ -74,7 +85,7 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.001, t_max=20)
 
     rotation = np.array(R_rot)
 
-    print(F_portance, F_trainee)
+    # print(F_portance, F_trainee)
     print(pos)
 
     return Px, Py, Pz, pos, rotation
@@ -114,9 +125,9 @@ def plot_angles(rotation, dt):
     t = np.arange(nb_points) * dt
 
     plt.figure()
-    plt.plot(t, angles[:, 0], label="Angle X (roulis (si je ne me trompe pas))")
+    plt.plot(t, angles[:, 0], label="Angle X (roulis)")
     plt.plot(t, angles[:, 1], label="Angle Y (tangage)")
-    plt.plot(t, angles[:, 2], label="Angle Z (lacet ?)")
+    plt.plot(t, angles[:, 2], label="Angle Z (lacet)")
 
     plt.xlabel("Temps (en s)")
     plt.ylabel("Angle (en degrés)")
