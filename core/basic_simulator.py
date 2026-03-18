@@ -86,7 +86,7 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.001, t_max=20)
     rotation = np.array(R_rot)
 
     # print(F_portance, F_trainee)
-    print(pos)
+    # print(pos)
 
     return Px, Py, Pz, pos, rotation
 
