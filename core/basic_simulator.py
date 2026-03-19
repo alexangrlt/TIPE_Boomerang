@@ -90,6 +90,37 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.001, t_max=20)
 
     return Px, Py, Pz, pos, rotation
 
+def compute_forces_be(elements,v_translation, omega, rot_current, config):
+    """calcule la force totale F_tot exercée sur chaque éléments
+
+    Args:
+        elements (dict): dictionnaireayant toutes les infos de chaque element du boomerang
+        v_translation (array): tableau des vitesses de translation du centre de masse du boomerang en fonction du temps en 3axes
+        omega (array): tableau des vitesses de rotation 3axes en fonction du temps
+        rot_current (scipy rot): orientation du boomerang
+        config (_type_): appel des données de config
+    """
+    Cx_temp=0.8                     # ? a changer avec les données de xflr
+    Cz_temp=0.45                    # ? a changer avec les données de xflr
+    F_tot=np.zeros(3)               #init ma liste des forces (3axes) avec des zeros, je change apres les valeurs
+    for e in elements:
+        #position du troncon dans le repère terrestre (absolu)
+        "Toutes les infos dans le ref absolu je les noterai ..._abs"
+        vect_unit_abs=rot_current.apply(e["vect_unit"])
+        r_vec=e["r"]*vect_unit_abs
+        #vitesse relative
+        v_rel=v_translation+np.cross(omega,r_vec)
+        V=np.linalg.norm(v_rel)
+        if V < 1e-6:
+            continue
+        q=0.5*config.rho_air*V**2 #pression exercée par l'air sur le boomerang
+        #calcul de la normale à l'élément de pale
+        n=rot_current.apply(np.array([0,0,1]))
+        dF_portance=q*e["dS"]*Cz_temp*n
+        dF_trainee=q*e["dS"]*Cx_temp*(-v_rel/V)
+        F_tot+=dF_portance+dF_trainee
+    return F_tot
+
 
 def plot_rot(rotation, title="Position Angulaire"):
     fig = plt.figure()

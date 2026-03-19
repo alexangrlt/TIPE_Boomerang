@@ -17,9 +17,9 @@ def get_blade_element(config):
             dS=c*dr
             elements.append({"r": r,
                 "dr": dr,
-                "chord": c,
+                "c": c,
                 "dS": dS,
                 "angle_pale": angle_rad,
-                "u_rad": vect_unit,
+                "vect_unit": vect_unit,
             })
     return elements
