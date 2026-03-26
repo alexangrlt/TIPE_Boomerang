@@ -9,7 +9,7 @@ def get_blade_element(config):
     
     elements=[]
     for i in config.angles_pales:
-        angle_rad=np.rad(i)
+        angle_rad=np.radians(i)
         """je me crée un vecteur unitaire associé à cet angle"""
         vect_unit=np.array([np.cos(angle_rad),np.sin(angle_rad),0]) #[x,y,z]
         for j,r in enumerate(r_values):     #enumerate donne l'indice ET la valeur !

@@ -5,6 +5,7 @@ from scipy.interpolate import (
     interp1d,
 )  # je vais en avoir besoin pr remplir le vide entre les valeurs que va me donner XFLR
 from core.boomerang_config import Boomerang_standard, BoomerangConfig
+from core.blade_elements import get_blade_element
 
 # ! mettre en place les tronçons, appliquer les forces dessus + calculs moments
 # mais je galere vrmt a decouper le boomerang en troncon...
@@ -28,6 +29,8 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.001, t_max=20)
 
     rot_current = R.from_rotvec([65 * np.pi / 180, 0, 0])
     omega = np.array([0, 8, 0])  # on considère une vitesse angulaire constante ici
+    
+    elements=get_blade_element(config)
 
     while t < t_max and position[2] > 0:
         pos.append(
@@ -65,9 +68,10 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.001, t_max=20)
         #     F_trainee = np.array([0, 0, 0])
 
         # F_tot = F_gravite + F_magnus + F_portance + F_trainee
-        F_tot = F_gravite  #! +  F_totPale
-        # ? je dois faire un F_totPale qui est la somme de mes F_troncon.
-        # ? sauf que je galere a faire mon decoupage en troncons...
+        F_pale = compute_forces_be(elements,vitesse,rot_current,config)
+        
+        F_tot = F_gravite  + F_pale
+        
         acceleration = F_tot / config.masse
 
         vitesse += acceleration * dt
