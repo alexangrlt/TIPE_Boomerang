@@ -7,12 +7,8 @@ from scipy.interpolate import (
 from core.boomerang_config import Boomerang_standard, BoomerangConfig
 from core.blade_elements import get_blade_element
 
-# ! mettre en place les tronçons, appliquer les forces dessus + calculs moments
-# mais je galere vrmt a decouper le boomerang en troncon...
-# prcq il n'est pas plein dans le sens où si je fais des petits cercles depuis le centre, j'ai pas mal de vide a des moments...
-# ? mais mon idée à l'air d'être un "blade element theory" https://en.wikipedia.org/wiki/Blade_element_theory
-# je vais voir si j'ai une idée sinon je demande de l'aide
-# je me suis précipité sur cette idée mais je bloque...
+# ! mettre en place un compute_moments_be
+# ? en faisant cela, je recup mon M_tot (moment total) de chaque element de pale et je l'intègre de la meme manière que les Forces (F_tot)
 
 
 def simulate_projectile(position_init, vitesse_init, config, dt=0.001, t_max=20):
@@ -41,34 +37,8 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.001, t_max=20)
         Pz.append(position[2])
         """Forces"""
         F_gravite = np.array([0, 0, -config.masse * g])
-        # F_magnus = config.Cm * np.cross(omega, vitesse)
-        # F_portance = (
-        #     0.5
-        #     * config.rho
-        #     * np.linalg.norm(vitesse) ** 2
-        #     * Boomerang_standard.surface()
-        #     * config.Cz
-        # ) * rot_current.apply(
-        #     [0, 0, 1]
-        # )  # prcq ça dépend de l'inclinaison (donc rotation) du boomerang
 
-        # if np.linalg.norm(vitesse) > 0:
-        #     F_trainee = (
-        #         -0.5
-        #         * config.rho
-        #         * np.linalg.norm(vitesse) ** 2
-        #         * Boomerang_standard.surface()
-        #         * config.Cx
-        #         * (
-        #             vitesse / np.linalg.norm(vitesse)
-        #         )  # pour avoir le sens de la force (le vecteur)
-        #     )
-
-        # else:
-        #     F_trainee = np.array([0, 0, 0])
-
-        # F_tot = F_gravite + F_magnus + F_portance + F_trainee
-        F_pale = compute_forces_be(elements,vitesse,rot_current,config)
+        F_pale = compute_forces_be(elements,vitesse,omega,rot_current,config)
         
         F_tot = F_gravite  + F_pale
         
