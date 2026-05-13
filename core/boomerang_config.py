@@ -50,6 +50,32 @@ class BoomerangConfig:
     def surface(self):
         """surface totale du boomerang"""
         return (self.c_root + self.c_tip) * self.R_pale  # calcul de surface, en m²
+    
+    def matrice_inertie(self):
+        """
+        2pales rectangulaires (pas vraiment mais je vais dire que c'est le cas prcq j'ai pas envie de faire la matrice d'inertie de la vraie forme...)
+        referentiel du boomerang avec z l'axe de rotation du boomerang
+        """
+        m_pale = self.masse/2           #la masse du boomerang /2 soit la masse d'une pale
+        L=self.R_pale                   #la longueur de pale
+        c=(self.c_root+self.c_tip)/2    #moyenne de corde de la pale (moyenne assez grossiere en vraie...)
+        Ixx=1/12 * m_pale * c**2
+        Iyy=1/3 * m_pale * L**2         #huygens
+        Izz=Ixx+Iyy
+        I_pale_ref = np.diag([Ixx, Iyy, Izz])
 
+        I_total = np.zeros((3, 3))
+        for angle_deg in self.angles_pales:
+            angle_rad = np.radians(angle_deg)
+            # Matrice de rotation autour de z
+            Rz = np.array([
+                [ np.cos(angle_rad), -np.sin(angle_rad), 0],
+                [ np.sin(angle_rad),  np.cos(angle_rad), 0],
+                [0,                   0,                  1]
+            ])
+            # Rotation du tenseur : I_rotated = Rz @ I_pale_ref @ Rz.T
+            I_total += Rz @ I_pale_ref @ Rz.T
+
+        return I_total
 
 Boomerang_standard = BoomerangConfig()
