@@ -22,14 +22,14 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.001, t_max=20)
     # ? j'ai considéré le boomerang a 25° p/r a la normale au sol (z)
     # ? donc 65° p/r a x (avec x vers l'avant, y vers la gauche et z vers le haut)
 
-    rot_current = R.from_rotvec([65 * np.pi / 180, 0, 0])
+    rot_current = R.from_rotvec([20 * np.pi / 180, 0, 0])
     # omega = np.array([0, 8, 0])  # on considère une vitesse angulaire constante ici
 
     elements = get_blade_element(config)
 
     I=config.matrice_inertie()
     I_inv=np.linalg.inv(I)
-    omega=np.array([0.0, 0.0, 8.0])       #omega est mtn une variable contrairement a ce que j'avais fait avant avec la ligne 26
+    omega=np.array([0.0, 0.0, 50.0])    #omega est mtn une variable contrairement a ce que j'avais fait avant avec la ligne 26
 
     while t < t_max and position[2] > 0:
         pos.append(
@@ -48,7 +48,7 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.001, t_max=20)
         #? mise en place precession gyrosc
         gyro=np.cross(omega,I@omega)
         omega_point=I_inv@(M_aero-gyro)
-        omega+=omega_dot*dt
+        omega+=omega_point*dt
 
         acceleration = F_tot / config.masse
 
@@ -83,12 +83,12 @@ def compute_forces_be(elements, v_translation, omega, rot_current, config):
         rot_current (scipy rot): orientation du boomerang
         config (_type_): appel des données de config
     """
-    Cx_temp = 0.8  # ? a changer avec les données de xflr
-    Cz_temp = 0.45  # ? a changer avec les données de xflr
+    Cx_temp = 2.5  #? a changer avec les données de xflr
+    Cz_temp = 0.2  #? a changer avec les données de xflr
     F_tot = np.zeros(
         3
     )  # init ma liste des forces (3axes) avec des zeros, je change apres les valeurs
-    F_tot = np.zeros(
+    M_tot = np.zeros(
         3
     )  # init ma liste des moments (3axes) avec des zeros, je change apres les valeurs (pareil que forces)
     for e in elements:
@@ -107,8 +107,12 @@ def compute_forces_be(elements, v_translation, omega, rot_current, config):
         
         # calcul de la normale à l'élément de pale
         n = rot_current.apply(np.array([0, 0, 1]))
+        # forcer la normale vers le haut (composante Z positive) - prcq j'ai eu une normale vers le bas a un moment (jsp pq) et je veux eviter ce pb
+        if n[2] < 0:
+            n = -n
+
         dF_portance = q * e["dS"] * Cz_temp * n
-        dF_trainee = q * e["dS"] * Cx_temp * (-v_rel / V)
+        dF_trainee  = q * e["dS"] * Cx_temp * (-v_rel / V)
         dF=dF_portance + dF_trainee
         F_tot += dF
         dM=np.cross(r_vec,dF)   #prod vect OM ^ F
