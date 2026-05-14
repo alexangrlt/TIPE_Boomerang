@@ -6,11 +6,12 @@ from scipy.interpolate import (
 )  # je vais en avoir besoin pr remplir le vide entre les valeurs que va me donner XFLR
 from core.boomerang_config import Boomerang_standard, BoomerangConfig
 from core.blade_elements import get_blade_element
+from core.xflr_data import load_data
 
 #! equation d'euler pour l'évolution de omega pr l'effet gyroscopique
 
 
-def simulate_projectile(position_init, vitesse_init, config, dt=0.001, t_max=20):
+def simulate_projectile(position_init, vitesse_init, config, dt=0.0001, t_max=20):
     position = position_init.copy()
     vitesse = vitesse_init.copy()
     t = 0
@@ -83,8 +84,12 @@ def compute_forces_be(elements, v_translation, omega, rot_current, config):
         rot_current (scipy rot): orientation du boomerang
         config (_type_): appel des données de config
     """
-    Cx_temp = 2.5  #? a changer avec les données de xflr
-    Cz_temp = 0.2  #? a changer avec les données de xflr
+    alpha_local = .........             #!aplha local du tronçon
+    Cx_temp = Cl_p1d(alpha_local)  #? Cl donné par xflr into interp1d
+    Cz_temp = Cd_p1d(alpha_local)  #? Cd donné par xflr into interp1d
+    
+    #! pb d'import des variables précédentes apparemment, je regarde dans pas longtemps (je fini de gérer xflr d'abord)
+    
     F_tot = np.zeros(
         3
     )  # init ma liste des forces (3axes) avec des zeros, je change apres les valeurs
@@ -93,7 +98,7 @@ def compute_forces_be(elements, v_translation, omega, rot_current, config):
     )  # init ma liste des moments (3axes) avec des zeros, je change apres les valeurs (pareil que forces)
     for e in elements:
         # position du troncon dans le repère terrestre (absolu)
-        "Toutes les infos dans le ref absolu je les noterai ..._abs"
+        "Toutes les infos dans le ref absolu je les noterai ..._abs (si j'y pense)"
         vect_unit_abs = rot_current.apply(e["vect_unit"])
         r_vec = e["r"] * vect_unit_abs
         # vitesse relative
@@ -120,7 +125,7 @@ def compute_forces_be(elements, v_translation, omega, rot_current, config):
     return F_tot, M_tot
 
 
-def plot_rot(rotation, title="Position Angulaire"):
+def plot_rot(rotation, title="Position Angulaire du centre d'inertie du Boomerang"):
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
     ax.plot(rotation[:, 0], rotation[:, 1], rotation[:, 2], label="rotation")
@@ -132,7 +137,7 @@ def plot_rot(rotation, title="Position Angulaire"):
     plt.show()
 
 
-def plot_trajectory_3d(pos, title="Trajectoire du Projectile"):
+def plot_trajectory_3d(pos, title="Trajectoire du Boomerang"):
     pos = np.array(pos)
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
