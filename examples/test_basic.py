@@ -10,7 +10,7 @@ px, py, pz, pos, R_rot = simulate_projectile(
     np.array([0.0, 0.0, 1.5]),   # position_init : hauteur de lancer réaliste
     np.array([22.0, 0.0, 2.0]),  # vitesse_init : ~22 m/s vers l'avant
     Boomerang_standard,
-    dt=0.0005,
+    dt=0.0002,
     t_max=15,
 )
 

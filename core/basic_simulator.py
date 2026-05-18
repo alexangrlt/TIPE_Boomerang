@@ -47,8 +47,13 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
 
         # Précession gyroscopique (équation d'Euler)
         gyro = np.cross(omega, I @ omega)
-        omega_point = I_inv @ (M_aero - gyro)
-        omega += omega_point * dt
+        
+        def omega_deriv(w):
+            return I_inv @ (M_aero - np.cross(w, I @ w))
+
+        k1 = omega_deriv(omega)
+        k2 = omega_deriv(omega + k1 * dt)
+        omega = omega + 0.5 * (k1 + k2) * dt
 
         # Limiter omega pour éviter divergence numérique
         omega_norm = np.linalg.norm(omega)
@@ -120,7 +125,7 @@ def plot_rot(rotation, title="Position Angulaire du centre d'inertie du Boomeran
     plt.show()
 
 
-def plot_trajectory_3d(pos, title="Trajectoire du Projectile"):
+def plot_trajectory_3d(pos, title="Trajectoire du Boomerang"):
     pos = np.array(pos)
     fig = plt.figure()
     ax = fig.add_subplot(projection="3d")
