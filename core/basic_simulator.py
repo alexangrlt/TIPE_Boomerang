@@ -18,8 +18,8 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     R_rot = []
     g = 9.81
 
-    # Boomerang lancé quasi vertical, incliné ~20° sur X (axe de lancer)
-    rot_current = R.from_rotvec([20 * np.pi / 180, 0, 0])
+    # Boomerang lancé quasi vertical (~80° par rapport au sol)
+    rot_current = R.from_rotvec([80 * np.pi / 180, 0, 0])
 
     elements = get_blade_element(config)
 
