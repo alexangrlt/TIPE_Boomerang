@@ -5,7 +5,7 @@ from scipy.interpolate import (
     interp1d,
 )  # je vais en avoir besoin pr remplir le vide entre les valeurs que va me donner XFLR
 from core.boomerang_config import Boomerang_standard, BoomerangConfig
-from core.blade_elements import get_blade_element, Cl_p1d, Cd_p1d, alpha_local
+from core.blade_elements import get_blade_element, Cl_p1d, Cd_p1d
 from core.xflr_data import load_data
 
 #! equation d'euler pour l'évolution de omega pr l'effet gyroscopique
@@ -116,6 +116,10 @@ def compute_forces_be(elements, v_translation, omega, rot_current, config):
         if n[2] < 0:
             n = -n
 
+        v_normale = np.dot(v_rel, n)
+        v_tang = np.linalg.norm(v_rel - v_normale * n)
+        alpha_local = np.degrees(np.arctan2(v_normale, v_tang + 1e-9))
+        
         dF_portance = q * e["dS"] * Cz_temp * n
         dF_trainee  = q * e["dS"] * Cx_temp * (-v_rel / V)
         dF=dF_portance + dF_trainee

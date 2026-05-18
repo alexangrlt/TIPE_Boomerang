@@ -18,10 +18,6 @@ def get_blade_element(config):
         angle_rad = np.radians(i)
         """je me crée un vecteur unitaire associé à cet angle"""
         vect_unit = np.array([np.cos(angle_rad), np.sin(angle_rad), 0])     #[x,y,z]
-        
-        v_local =  ......               #vitesse locale tronçon (translation + rotation)
-        alpha_local = np.degrees(np.arctan2(v_local[2],np.linalg.norm(v_local[:2])))
-        
         for j, r in enumerate(r_values):  # enumerate donne l'indice ET la valeur !
             c = chord_values[j]
             dS = c * dr
