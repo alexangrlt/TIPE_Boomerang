@@ -6,34 +6,18 @@ from core.blade_elements import get_blade_element, Cl_p1d, Cd_p1d
 
 
 def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15):
-    """
-    Simule la trajectoire 3D d'un boomerang.
-
-    Physique implementée :
-    - Gravité
-    - Forces aérodynamiques (BE method) avec déséquilibre pale avançante/reculante
-    - Précession gyroscopique (eq. d'Euler dans le repere corps)
-    - Rotation de l'orientation via quaternion
-
-    Conventions :
-    - Le boomerang est lancé dans la direction +X
-    - Son plan est initialement quasi vertical (incliné ~80deg par rapport au sol)
-    - omega est exprimé dans le REPERE MONDE
-    - Les moments sont calculés dans le repere monde puis transformés en repere corps
-      pour intégrer l'équation d'Euler
-    """
     position = np.array(position_init, dtype=float)
     vitesse  = np.array(vitesse_init,  dtype=float)
     g = np.array([0.0, 0.0, -9.81])
 
-    # Orientation initiale : plan du boomerang incliné a 80deg
-    # Rotation autour de X de 80deg -> la normale au plan pointe vers le haut-avant
+    # Plan du boomerang incliné à 80deg par rapport au sol
     rot = R.from_euler('x', 80.0, degrees=True)
 
-    I     = config.matrice_inertie()       # tenseur inertie dans le repere corps
+    I     = config.matrice_inertie()
     I_inv = np.linalg.inv(I)
 
-    # omega dans le repere monde, ~130 rad/s autour de la normale au plan
+    # Rotation dans le sens anti-horaire vu du dessus (sens standard lancer droitier)
+    # omega positif autour de la normale au plan = sens qui crée précession vers +Y
     omega_monde = rot.apply(np.array([0.0, 0.0, 130.0]))
 
     elements = get_blade_element(config)
@@ -41,46 +25,49 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     pos_list = []
     rot_list = []
     t = 0.0
+    step = 0
 
     while t < t_max and position[2] >= 0.0:
         pos_list.append(position.copy())
         rot_list.append(rot.as_rotvec())
 
-        # ---- Forces et moments dans le repere monde ----
-        F_aero, M_monde = compute_forces_be(
-            elements, vitesse, omega_monde, rot, config
-        )
+        F_aero, M_monde = compute_forces_be(elements, vitesse, omega_monde, rot, config)
         F_tot = config.masse * g + F_aero
 
-        # ---- Equation d'Euler dans le repere CORPS ----
-        # On passe omega et M en repere corps pour l'integration
-        rot_inv      = rot.inv()
-        omega_corps  = rot_inv.apply(omega_monde)
-        M_corps      = rot_inv.apply(M_monde)
+        # Equation d'Euler dans le repère corps
+        rot_inv     = rot.inv()
+        omega_corps = rot_inv.apply(omega_monde)
+        M_corps     = rot_inv.apply(M_monde)
 
-        domega_corps = I_inv @ (M_corps - np.cross(omega_corps, I @ omega_corps))
+        def domega(oc, mc):
+            return I_inv @ (mc - np.cross(oc, I @ oc))
 
-        # Integration RK2 sur omega_corps
-        omega_c2     = omega_corps + domega_corps * dt
-        M_corps2     = M_corps  # approximation 1er ordre
-        domega_c2    = I_inv @ (M_corps2 - np.cross(omega_c2, I @ omega_c2))
-        omega_corps_new = omega_corps + 0.5 * (domega_corps + domega_c2) * dt
+        # RK4 sur omega_corps
+        k1 = domega(omega_corps,          M_corps)
+        k2 = domega(omega_corps + k1*dt/2, M_corps)
+        k3 = domega(omega_corps + k2*dt/2, M_corps)
+        k4 = domega(omega_corps + k3*dt,   M_corps)
+        omega_corps_new = omega_corps + (k1 + 2*k2 + 2*k3 + k4) * dt / 6
 
-        # Clamp spin pour stabilite
+        # Clamp spin
         spd = np.linalg.norm(omega_corps_new)
         if spd > 250.0:
             omega_corps_new = omega_corps_new / spd * 250.0
 
-        # Repasser omega en repere monde
         omega_monde = rot.apply(omega_corps_new)
 
-        # ---- Integration translation ----
+        # Integration translation
         vitesse  += (F_tot / config.masse) * dt
         position += vitesse * dt
 
-        # ---- Mise a jour orientation ----
-        # omega_monde * dt = vecteur de rotation infinitesimal
+        # Mise à jour orientation
         rot = R.from_rotvec(omega_monde * dt) * rot
+
+        # Renormalisation du quaternion toutes les 100 étapes
+        step += 1
+        if step % 100 == 0:
+            q = rot.as_quat()
+            rot = R.from_quat(q / np.linalg.norm(q))
 
         t += dt
 
@@ -94,24 +81,15 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
 
 
 def compute_forces_be(elements, v_cm, omega_monde, rot, config):
-    """
-    Calcul des forces et moments aérodynamiques par la méthode des éléments de pale.
-
-    Pour chaque tronçon :
-    - Position r_vec = r * axe_pale (repere monde)
-    - Vitesse locale = v_cm + omega x r_vec
-    - alpha = angle entre v_rel et le plan du boomerang
-    - Portance perpendiculaire a v_rel et a axe_pale
-    - Trainee dans -v_rel
-    """
     F_tot = np.zeros(3)
     M_tot = np.zeros(3)
 
-    # Normale au plan du boomerang (repere monde)
+    # Normale au plan du boomerang (repère monde)
+    # Pointe dans le sens du spin (convention droitier : vers haut-droite)
     n_plan = rot.apply(np.array([0.0, 0.0, 1.0]))
 
     for e in elements:
-        axe_pale = rot.apply(e["vect_unit"])  # repere monde
+        axe_pale = rot.apply(e["vect_unit"])
         r_vec    = e["r"] * axe_pale
 
         v_rel = v_cm + np.cross(omega_monde, r_vec)
@@ -119,27 +97,26 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
         if V < 0.5:
             continue
 
-        # Angle d'attaque : angle entre v_rel et le plan
-        v_n     = np.dot(v_rel, n_plan)          # composante normale au plan
-        v_t     = v_rel - v_n * n_plan           # composante dans le plan
+        # Angle d'attaque
+        v_n     = np.dot(v_rel, n_plan)
+        v_t     = v_rel - v_n * n_plan
         v_t_mag = np.linalg.norm(v_t)
         alpha   = np.degrees(np.arctan2(v_n, v_t_mag + 1e-9))
 
         Cl = float(Cl_p1d(alpha))
         Cd = float(Cd_p1d(alpha))
-
         q  = 0.5 * config.rho_air * V**2
 
-        # Direction de portance : perp a v_rel ET perp a axe_pale
-        # => c'est le vrai lift selon la theorie de l'aile
+        # Portance : cross(v_rel, axe_pale), normalisé
+        # Ce vecteur est perpendiculaire à v_rel ET à l'envergure de la pale
         lift_dir = np.cross(v_rel, axe_pale)
         ld_norm  = np.linalg.norm(lift_dir)
         if ld_norm < 1e-9:
             continue
         lift_dir = lift_dir / ld_norm
 
-        # Signe : la portance s'oppose a la composante de v_rel selon n_plan
-        if np.dot(lift_dir, n_plan) * v_n < 0:
+        # La portance doit être du côté de n_plan (face aspirée du profil)
+        if np.dot(lift_dir, n_plan) < 0:
             lift_dir = -lift_dir
 
         dF = q * e["dS"] * (Cl * lift_dir - Cd * v_rel / V)
