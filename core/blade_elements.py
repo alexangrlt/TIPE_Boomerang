@@ -7,30 +7,30 @@ Cl_p1d, Cd_p1d = load_data("NACA_4420_T1_Re0.080_M0.00_N9.0.txt")
 
 def get_blade_element(config):
     r_values = config.e  # init des rayons avec le linspace
-    dr = r_values[1] - r_values[0]  #pas de 2 rayons consécutifs (il est uniforme)
+    dr = r_values[1] - r_values[0]  # pas uniforme
 
     chord_values = np.linspace(
         config.c_root, config.c_tip, config.N_troncons
-    )       #valeurs des cordes pour chaque r
+    )  # corde pour chaque r
 
     elements = []
     for i in config.angles_pales:
         angle_rad = np.radians(i)
-        """je me crée un vecteur unitaire associé à cet angle"""
-        vect_unit = np.array([np.cos(angle_rad), np.sin(angle_rad), 0])     #[x,y,z]
-        for j, r in enumerate(r_values):  # enumerate donne l'indice ET la valeur !
+        # vecteur unitaire dans la direction de la pale
+        vect_unit = np.array([np.cos(angle_rad), np.sin(angle_rad), 0])
+        for j, r in enumerate(r_values):
             c = chord_values[j]
             dS = c * dr
-            elements.append(
-                {
-                    "r": r,
-                    "dr": dr,
-                    "c": c,
-                    "dS": dS,
-                    "angle_pale": angle_rad,
-                    "vect_unit": vect_unit,
-                }
-            )
+            base = {
+                "dr": dr,
+                "c": c,
+                "dS": dS,
+                "angle_pale": angle_rad,
+                "vect_unit": vect_unit,
+            }
+            # tronçon coté + (bout de pale)
+            elements.append({**base, "r": r})
+            # tronçon coté - (base de pale de l'autre côté du centre)
+            # nécessaire pour le déséquilibre avançant/reculant
+            elements.append({**base, "r": -r})
     return elements
-
-
