@@ -26,7 +26,7 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     I = config.matrice_inertie()
     I_inv = np.linalg.inv(I)
 
-    # omega ~130 rad/s (~20 tours/s) : valeur réaliste pour un lancer de boomerang
+    # omega ~130 rad/s (~20 tours/s)
     omega = rot_current.apply(np.array([0.0, 0.0, 130.0]))
 
     while t < t_max and position[2] > 0:
@@ -64,18 +64,26 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
 
 
 def compute_forces_be(elements, v_translation, omega, rot_current, config):
-    """Calcule la force totale et le moment aérodynamique sur toutes les pales."""
+    """
+    Calcule la force totale et le moment aérodynamique sur toutes les pales.
+
+    Pour chaque tronçon de pale :
+    - axe_pale : direction de la pale dans le monde (vect_unit tourné)
+    - n        : normale au plan du boomerang
+    - lift_dir : perpendiculaire à axe_pale ET à n (= direction de portance correcte)
+    - alpha    : angle entre v_rel et le plan du boomerang
+    """
     F_tot = np.zeros(3)
     M_tot = np.zeros(3)
 
-    # normale au plan du boomerang (axe Z local exprimé dans le monde)
+    # normale au plan du boomerang dans le monde
     n = rot_current.apply(np.array([0.0, 0.0, 1.0]))
     if n[2] < 0:
         n = -n
 
     for e in elements:
-        vect_unit_abs = rot_current.apply(e["vect_unit"])
-        r_vec = e["r"] * vect_unit_abs
+        axe_pale = rot_current.apply(e["vect_unit"])   # direction de la pale dans le monde
+        r_vec = e["r"] * axe_pale
 
         v_rel = v_translation + np.cross(omega, r_vec)
         V = np.linalg.norm(v_rel)
@@ -85,7 +93,7 @@ def compute_forces_be(elements, v_translation, omega, rot_current, config):
 
         q = 0.5 * config.rho_air * V**2
 
-        # Angle d'attaque : angle entre v_rel et le plan du boomerang
+        # Alpha : angle entre v_rel et le plan de la pale
         v_normale = np.dot(v_rel, n)
         v_tang = np.linalg.norm(v_rel - v_normale * n)
         alpha_local = np.degrees(np.arctan2(v_normale, v_tang + 1e-9))
@@ -93,14 +101,19 @@ def compute_forces_be(elements, v_translation, omega, rot_current, config):
         Cl_temp = float(Cl_p1d(alpha_local))
         Cd_temp = float(Cd_p1d(alpha_local))
 
-        # Direction de portance : perp a v_rel dans le plan (v_rel, n)
-        dir_portance = np.cross(np.cross(v_rel, n), v_rel)
-        dp_norm = np.linalg.norm(dir_portance)
-        if dp_norm < 1e-9:
+        # Direction de portance : perp a axe_pale ET perp a n
+        # = direction dans laquelle la pale "pousse" l'air
+        lift_dir = np.cross(axe_pale, n)
+        ld_norm = np.linalg.norm(lift_dir)
+        if ld_norm < 1e-9:
             continue
-        dir_portance = dir_portance / dp_norm
+        lift_dir = lift_dir / ld_norm
 
-        dF_portance = q * e["dS"] * Cl_temp * dir_portance
+        # Signe : la portance doit s'opposer a la composante normale de v_rel
+        if np.dot(lift_dir, v_rel) > 0:
+            lift_dir = -lift_dir
+
+        dF_portance = q * e["dS"] * Cl_temp * lift_dir
         dF_trainee  = q * e["dS"] * Cd_temp * (-v_rel / V)
         dF = dF_portance + dF_trainee
         F_tot += dF
