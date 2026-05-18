@@ -68,7 +68,7 @@ def compute_forces_be(elements, v_translation, omega, rot_current, config):
     F_tot = np.zeros(3)
     M_tot = np.zeros(3)
 
-    # normale calculée une seule fois pour tous les tronçons
+    # normale au plan du boomerang (axe Z local exprimé dans le monde)
     n = rot_current.apply(np.array([0.0, 0.0, 1.0]))
     if n[2] < 0:
         n = -n
@@ -85,6 +85,7 @@ def compute_forces_be(elements, v_translation, omega, rot_current, config):
 
         q = 0.5 * config.rho_air * V**2
 
+        # Angle d'attaque : angle entre v_rel et le plan du boomerang
         v_normale = np.dot(v_rel, n)
         v_tang = np.linalg.norm(v_rel - v_normale * n)
         alpha_local = np.degrees(np.arctan2(v_normale, v_tang + 1e-9))
@@ -92,7 +93,14 @@ def compute_forces_be(elements, v_translation, omega, rot_current, config):
         Cl_temp = float(Cl_p1d(alpha_local))
         Cd_temp = float(Cd_p1d(alpha_local))
 
-        dF_portance = q * e["dS"] * Cl_temp * n
+        # Direction de portance : perp a v_rel dans le plan (v_rel, n)
+        dir_portance = np.cross(np.cross(v_rel, n), v_rel)
+        dp_norm = np.linalg.norm(dir_portance)
+        if dp_norm < 1e-9:
+            continue
+        dir_portance = dir_portance / dp_norm
+
+        dF_portance = q * e["dS"] * Cl_temp * dir_portance
         dF_trainee  = q * e["dS"] * Cd_temp * (-v_rel / V)
         dF = dF_portance + dF_trainee
         F_tot += dF
