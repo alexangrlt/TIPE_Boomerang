@@ -2,7 +2,7 @@ import numpy as np
 from scipy.interpolate import interp1d  # je vais en avoir besoin pr remplir le vide entre les valeurs que va me donner XFLR
 
 def load_data(chemin_d_acces_au_fichier):
-    data=np.loadtxt(chemin_d_acces_au_fichier,skiprows=............)
+    data=np.loadtxt(chemin_d_acces_au_fichier,skiprows=11)
     
     #recup le alpha, Cl,Cd
     alpha=data[:,0]
