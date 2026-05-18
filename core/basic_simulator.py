@@ -5,7 +5,7 @@ from scipy.interpolate import (
     interp1d,
 )  # je vais en avoir besoin pr remplir le vide entre les valeurs que va me donner XFLR
 from core.boomerang_config import Boomerang_standard, BoomerangConfig
-from core.blade_elements import get_blade_element
+from core.blade_elements import get_blade_element, Cl_p1d, Cd_p1d, alpha_local
 from core.xflr_data import load_data
 
 #! equation d'euler pour l'évolution de omega pr l'effet gyroscopique
@@ -84,7 +84,7 @@ def compute_forces_be(elements, v_translation, omega, rot_current, config):
         rot_current (scipy rot): orientation du boomerang
         config (_type_): appel des données de config
     """
-    alpha_local = .........             #!aplha local du tronçon
+
     Cx_temp = Cl_p1d(alpha_local)  #? Cl donné par xflr into interp1d
     Cz_temp = Cd_p1d(alpha_local)  #? Cd donné par xflr into interp1d
     

@@ -1,20 +1,27 @@
 import numpy as np
 from core.boomerang_config import BoomerangConfig
+from core.xflr_data import load_data
 
+
+Cl_p1d, Cd_p1d = load_data("NACA_4420_T1_Re0.080_M0.00_N9.0.txt")
 
 def get_blade_element(config):
     r_values = config.e  # init des rayons avec le linspace
-    dr = r_values[1] - r_values[0]  # le pas de 2 rayons consécutifs -- uniforme
+    dr = r_values[1] - r_values[0]  #pas de 2 rayons consécutifs (il est uniforme)
 
     chord_values = np.linspace(
         config.c_root, config.c_tip, config.N_troncons
-    )  # valeurs des cordes pour chaque r
+    )       #valeurs des cordes pour chaque r
 
     elements = []
     for i in config.angles_pales:
         angle_rad = np.radians(i)
         """je me crée un vecteur unitaire associé à cet angle"""
-        vect_unit = np.array([np.cos(angle_rad), np.sin(angle_rad), 0])  # [x,y,z]
+        vect_unit = np.array([np.cos(angle_rad), np.sin(angle_rad), 0])     #[x,y,z]
+        
+        v_local =  ......               #vitesse locale tronçon (translation + rotation)
+        alpha_local = np.degrees(np.arctan2(v_local[2],np.linalg.norm(v_local[:2])))
+        
         for j, r in enumerate(r_values):  # enumerate donne l'indice ET la valeur !
             c = chord_values[j]
             dS = c * dr
@@ -29,3 +36,5 @@ def get_blade_element(config):
                 }
             )
     return elements
+
+
