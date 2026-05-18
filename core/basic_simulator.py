@@ -1,9 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation as R
-from scipy.interpolate import (
-    interp1d,
-)
+from scipy.interpolate import interp1d
 from core.boomerang_config import Boomerang_standard, BoomerangConfig
 from core.blade_elements import get_blade_element, Cl_p1d, Cd_p1d
 from core.xflr_data import load_data
@@ -21,7 +19,6 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     g = 9.81
 
     # Boomerang lancé quasi vertical, incliné ~20° sur X (axe de lancer)
-    # Le plan du boomerang est presque perpendiculaire au sol au moment du lancer
     rot_current = R.from_rotvec([20 * np.pi / 180, 0, 0])
 
     elements = get_blade_element(config)
@@ -29,8 +26,7 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     I = config.matrice_inertie()
     I_inv = np.linalg.inv(I)
 
-    # omega dans le repère monde : ~70 rad/s ≈ 11 tours/s, axe Z (rotation principale)
-    # On tourne d'abord dans le repère boomerang puis on exprime dans le monde
+    # omega exprimé dans le repère boomerang au lancer
     omega = rot_current.apply(np.array([0.0, 0.0, 70.0]))
 
     while t < t_max and position[2] > 0:
@@ -45,24 +41,17 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
 
         F_tot = F_gravite + F_pale
 
-        # Précession gyroscopique (équation d'Euler)
-        gyro = np.cross(omega, I @ omega)
-        
-        def omega_deriv(w):
-            return I_inv @ (M_aero - np.cross(w, I @ w))
-
-        k1 = omega_deriv(omega)
-        k2 = omega_deriv(omega + k1 * dt)
+        # RK2 inline sur omega
+        k1 = I_inv @ (M_aero - np.cross(omega, I @ omega))
+        k2 = I_inv @ (M_aero - np.cross(omega + k1 * dt, I @ (omega + k1 * dt)))
         omega = omega + 0.5 * (k1 + k2) * dt
 
-        # Limiter omega pour éviter divergence numérique
+        # Clamp omega
         omega_norm = np.linalg.norm(omega)
         if omega_norm > 200.0:
             omega = omega / omega_norm * 200.0
 
-        acceleration = F_tot / config.masse
-        vitesse += acceleration * dt
-
+        vitesse += (F_tot / config.masse) * dt
         position = position + vitesse * dt
 
         R_rot.append(rot_current.as_rotvec())
@@ -79,6 +68,11 @@ def compute_forces_be(elements, v_translation, omega, rot_current, config):
     F_tot = np.zeros(3)
     M_tot = np.zeros(3)
 
+    # normale calculée une seule fois pour tous les tronçons
+    n = rot_current.apply(np.array([0.0, 0.0, 1.0]))
+    if n[2] < 0:
+        n = -n
+
     for e in elements:
         vect_unit_abs = rot_current.apply(e["vect_unit"])
         r_vec = e["r"] * vect_unit_abs
@@ -91,12 +85,6 @@ def compute_forces_be(elements, v_translation, omega, rot_current, config):
 
         q = 0.5 * config.rho_air * V**2
 
-        # Normale au plan de pale (axe Z du boomerang dans le repère monde)
-        n = rot_current.apply(np.array([0, 0, 1]))
-        if n[2] < 0:
-            n = -n
-
-        # Angle d'attaque local
         v_normale = np.dot(v_rel, n)
         v_tang = np.linalg.norm(v_rel - v_normale * n)
         alpha_local = np.degrees(np.arctan2(v_normale, v_tang + 1e-9))
