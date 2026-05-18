@@ -68,9 +68,6 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0001, t_max=20
 
     rotation = np.array(R_rot)
 
-    # print(F_portance, F_trainee)
-    # print(pos)
-
     return Px, Py, Pz, pos, rotation
 
 
@@ -78,27 +75,17 @@ def compute_forces_be(elements, v_translation, omega, rot_current, config):
     """calcule la force totale F_tot exercée sur chaque éléments
 
     Args:
-        elements (dict): dictionnaireayant toutes les infos de chaque element du boomerang
+        elements (dict): dictionnaire ayant toutes les infos de chaque element du boomerang
         v_translation (array): tableau des vitesses de translation du centre de masse du boomerang en fonction du temps en 3axes
         omega (array): tableau des vitesses de rotation 3axes en fonction du temps
         rot_current (scipy rot): orientation du boomerang
         config (_type_): appel des données de config
     """
+    F_tot = np.zeros(3)
+    M_tot = np.zeros(3)
 
-    Cx_temp = Cl_p1d(alpha_local)  #? Cl donné par xflr into interp1d
-    Cz_temp = Cd_p1d(alpha_local)  #? Cd donné par xflr into interp1d
-    
-    #! pb d'import des variables précédentes apparemment, je regarde dans pas longtemps (je fini de gérer xflr d'abord)
-    
-    F_tot = np.zeros(
-        3
-    )  # init ma liste des forces (3axes) avec des zeros, je change apres les valeurs
-    M_tot = np.zeros(
-        3
-    )  # init ma liste des moments (3axes) avec des zeros, je change apres les valeurs (pareil que forces)
     for e in elements:
         # position du troncon dans le repère terrestre (absolu)
-        "Toutes les infos dans le ref absolu je les noterai ..._abs (si j'y pense)"
         vect_unit_abs = rot_current.apply(e["vect_unit"])
         r_vec = e["r"] * vect_unit_abs
         # vitesse relative
@@ -108,24 +95,29 @@ def compute_forces_be(elements, v_translation, omega, rot_current, config):
         if V < 1e-6:
             continue
         
-        q = 0.5 * config.rho_air * V**2  # pression exercée par l'air sur le boomerang
-        
+        q = 0.5 * config.rho_air * V**2  # pression dynamique
+
         # calcul de la normale à l'élément de pale
         n = rot_current.apply(np.array([0, 0, 1]))
-        # forcer la normale vers le haut (composante Z positive) - prcq j'ai eu une normale vers le bas a un moment (jsp pq) et je veux eviter ce pb
         if n[2] < 0:
             n = -n
 
+        # angle d'attaque local : angle entre v_rel et le plan de pale
         v_normale = np.dot(v_rel, n)
         v_tang = np.linalg.norm(v_rel - v_normale * n)
         alpha_local = np.degrees(np.arctan2(v_normale, v_tang + 1e-9))
-        
-        dF_portance = q * e["dS"] * Cz_temp * n
-        dF_trainee  = q * e["dS"] * Cx_temp * (-v_rel / V)
-        dF=dF_portance + dF_trainee
+
+        # Cl et Cd depuis les polaires XFLR5
+        Cl_temp = float(Cl_p1d(alpha_local))   # portance
+        Cd_temp = float(Cd_p1d(alpha_local))   # traînée
+
+        dF_portance = q * e["dS"] * Cl_temp * n
+        dF_trainee  = q * e["dS"] * Cd_temp * (-v_rel / V)
+        dF = dF_portance + dF_trainee
         F_tot += dF
-        dM=np.cross(r_vec,dF)   #prod vect OM ^ F
-        M_tot+=dM
+        dM = np.cross(r_vec, dF)
+        M_tot += dM
+
     return F_tot, M_tot
 
 
@@ -154,10 +146,7 @@ def plot_trajectory_3d(pos, title="Trajectoire du Boomerang"):
 
 
 def plot_angles(rotation, dt):
-    # Conversion de la liste rotation en 'objet' rotations
     rotations = [R.from_rotvec(vec) for vec in rotation]
-
-    # Conversion de l'objet rotations en angle dans xyz (orientation)
     angles = np.array([r.as_euler("xyz", degrees=True) for r in rotations])
     nb_points = len(rotation)
     t = np.arange(nb_points) * dt
