@@ -26,8 +26,8 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     I = config.matrice_inertie()
     I_inv = np.linalg.inv(I)
 
-    # omega exprimé dans le repère boomerang au lancer
-    omega = rot_current.apply(np.array([0.0, 0.0, 70.0]))
+    # omega ~130 rad/s (~20 tours/s) : valeur réaliste pour un lancer de boomerang
+    omega = rot_current.apply(np.array([0.0, 0.0, 130.0]))
 
     while t < t_max and position[2] > 0:
         pos.append([position[0], position[1], position[2]])
@@ -48,8 +48,8 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
 
         # Clamp omega
         omega_norm = np.linalg.norm(omega)
-        if omega_norm > 200.0:
-            omega = omega / omega_norm * 200.0
+        if omega_norm > 250.0:
+            omega = omega / omega_norm * 250.0
 
         vitesse += (F_tot / config.masse) * dt
         position = position + vitesse * dt
