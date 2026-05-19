@@ -8,7 +8,7 @@ import numpy as np
 
 @dataclass(frozen=True)  # immutables
 class BoomerangConfig:
-    """Settings Boomerang 2 pales (rectangulaires)"""
+    """Settings Boomerang 2 pales"""
 
     # Parametres Geometriques
     L = 0.195  # longueur de pale en m                                                                      #? mesuré
