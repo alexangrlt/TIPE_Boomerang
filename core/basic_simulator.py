@@ -10,27 +10,29 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     vitesse  = np.array(vitesse_init,  dtype=float)
     g = np.array([0.0, 0.0, -9.81])
 
-    # Inclinaison autour de Y : coherent avec un lancer en +X
-    # Le plan du boomerang est quasi-vertical, legerement incline vers le haut-gauche
-    # (favorise la precession vers la gauche pour un droitier)
-    rot = R.from_euler('y', -80.0, degrees=True)
+    # Inclinaison autour de Y : coherent avec un lancer en +X.
+    # -75 deg : le plan du boomerang est quasi-vertical (15 deg par rapport
+    # a la verticale), incline legerement vers la gauche pour un droitier.
+    rot = R.from_euler('y', -75.0, degrees=True)
 
     I     = config.matrice_inertie()
     I_inv = np.linalg.inv(I)
 
-    # omega initial : ~1200 rpm = 125 rad/s autour de la normale au plan (axe Z corps)
-    omega_monde = rot.apply(np.array([0.0, 0.0, 125.0]))
+    # omega initial : ~1450 rpm = 150 rad/s autour de la normale au plan (Z corps)
+    omega_monde = rot.apply(np.array([0.0, 0.0, 150.0]))
 
     elements = get_blade_element(config)
 
     pos_list = []
     rot_list = []
+    omega_list = []
     t = 0.0
     step = 0
 
     while t < t_max and position[2] >= 0.0:
         pos_list.append(position.copy())
         rot_list.append(rot.as_rotvec())
+        omega_list.append(np.linalg.norm(omega_monde))
 
         F_aero, M_monde = compute_forces_be(elements, vitesse, omega_monde, rot, config)
         F_tot = config.masse * g + F_aero
@@ -49,11 +51,6 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         k3 = domega(omega_corps + k2 * dt/2, M_corps)
         k4 = domega(omega_corps + k3 * dt,   M_corps)
         omega_corps_new = omega_corps + (k1 + 2*k2 + 2*k3 + k4) * dt / 6
-
-        # Clamp spin (200 rad/s max ~ 1900 rpm)
-        spd = np.linalg.norm(omega_corps_new)
-        if spd > 200.0:
-            omega_corps_new = omega_corps_new / spd * 200.0
 
         omega_monde = rot.apply(omega_corps_new)
 
@@ -78,6 +75,7 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         [p[2] for p in pos_list],
         pos_list,
         np.array(rot_list),
+        np.array(omega_list),
     )
 
 
@@ -100,9 +98,8 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
             continue
 
         # --- Calcul de l'angle d'attaque ---
-        # On projette v_rel dans le plan perpendiculaire a axe_pale,
-        # puis on decompose en composante normale (n_plan -> portance)
-        # et composante tangentielle (dans le plan -> trainee).
+        # Projection de v_rel dans le plan perpendiculaire a axe_pale,
+        # puis decomposition en composante normale (portance) et tangentielle.
         v_rel_proj = v_rel - np.dot(v_rel, axe_pale) * axe_pale
         v_proj_mag = np.linalg.norm(v_rel_proj)
         if v_proj_mag < 1e-9:
@@ -118,8 +115,7 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
         q  = 0.5 * config.rho_air * V**2
 
         # --- Direction de portance ---
-        # L = (axe_pale x v_rel) norme : perpendiculaire a v_rel ET a l'envergure.
-        # Pas de correction de signe a posteriori : le signe de Cl gere le sens.
+        # cross(axe_pale, v_rel) : perpendiculaire a v_rel ET a l'envergure.
         lift_dir = np.cross(axe_pale, v_rel)
         ld_norm  = np.linalg.norm(lift_dir)
         if ld_norm < 1e-9:
