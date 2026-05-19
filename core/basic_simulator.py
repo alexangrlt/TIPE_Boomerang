@@ -11,22 +11,21 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     g = np.array([0.0, 0.0, -9.81])
 
     # Inclinaison autour de Y : coherent avec un lancer en +X.
-    # -75 deg : le plan du boomerang est quasi-vertical (15 deg par rapport
-    # a la verticale), incline legerement vers la gauche pour un droitier.
+    # -75 deg : le plan est quasi-vertical, legerement incline vers la gauche.
     rot = R.from_euler('y', -75.0, degrees=True)
 
     I     = config.matrice_inertie()
     I_inv = np.linalg.inv(I)
 
-    # omega initial : ~1450 rpm = 150 rad/s autour de la normale au plan (Z corps)
+    # omega initial : ~1450 rpm = 150 rad/s
     omega_monde = rot.apply(np.array([0.0, 0.0, 150.0]))
 
     elements = get_blade_element(config)
 
-    pos_list = []
-    rot_list = []
+    pos_list   = []
+    rot_list   = []
     omega_list = []
-    t = 0.0
+    t    = 0.0
     step = 0
 
     while t < t_max and position[2] >= 0.0:
@@ -34,13 +33,13 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         rot_list.append(rot.as_rotvec())
         omega_list.append(np.linalg.norm(omega_monde))
 
-        F_aero, M_monde = compute_forces_be(elements, vitesse, omega_monde, rot, config)
+        F_aero, M_prec = compute_forces_be(elements, vitesse, omega_monde, rot, config)
         F_tot = config.masse * g + F_aero
 
         # Equation d'Euler dans le repere corps
         rot_inv     = rot.inv()
         omega_corps = rot_inv.apply(omega_monde)
-        M_corps     = rot_inv.apply(M_monde)
+        M_corps     = rot_inv.apply(M_prec)
 
         def domega(oc, mc):
             return I_inv @ (mc - np.cross(oc, I @ oc))
@@ -52,16 +51,23 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         k4 = domega(omega_corps + k3 * dt,   M_corps)
         omega_corps_new = omega_corps + (k1 + 2*k2 + 2*k3 + k4) * dt / 6
 
+        # Freinage aerodynamique du spin : tau realiste ~8s
+        # (un boomerang perd ~20-30% de son spin sur 10s de vol)
+        # Modelise comme un couple de freinage proportionnel a omega^2
+        # applique uniquement sur la composante axiale (autour de Z corps)
+        TAU_SPIN = 8.0  # secondes
+        omega_corps_new[2] *= (1.0 - dt / TAU_SPIN)
+
         omega_monde = rot.apply(omega_corps_new)
 
-        # Integration translation (Euler explicite)
+        # Integration translation
         vitesse  += (F_tot / config.masse) * dt
         position += vitesse * dt
 
-        # Mise a jour orientation via vecteur de rotation instantane
+        # Mise a jour orientation
         rot = R.from_rotvec(omega_monde * dt) * rot
 
-        # Renormalisation du quaternion toutes les 100 etapes
+        # Renormalisation quaternion toutes les 100 etapes
         step += 1
         if step % 100 == 0:
             q = rot.as_quat()
@@ -80,26 +86,35 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
 
 
 def compute_forces_be(elements, v_cm, omega_monde, rot, config):
-    F_tot = np.zeros(3)
-    M_tot = np.zeros(3)
+    """
+    Calcule les forces et moments aerodynamiques par la methode des elements de pale.
+
+    Retourne :
+    - F_tot : force totale (portance + trainee) utilisee pour la translation
+    - M_prec : moment de PRECESSION uniquement (portance seule)
+
+    La trainee contribue a F_tot (ralentit la translation) mais PAS a M_prec.
+    En effet, le moment de trainee est principalement un freinage de spin
+    (couple autour de l'axe Z corps) qui est modelise separement avec une
+    constante de temps realiste (TAU_SPIN) pour eviter un effondrement brutal
+    du spin impossible physiquement.
+    """
+    F_tot  = np.zeros(3)
+    M_prec = np.zeros(3)
 
     # Normale au plan du boomerang dans le repere monde
     n_plan = rot.apply(np.array([0.0, 0.0, 1.0]))
 
     for e in elements:
-        # Axe de la pale (envergure) exprime dans le repere monde
         axe_pale = rot.apply(e["vect_unit"])
         r_vec    = e["r"] * axe_pale
 
-        # Vitesse relative locale de l'element de pale
         v_rel = v_cm + np.cross(omega_monde, r_vec)
         V = np.linalg.norm(v_rel)
         if V < 0.5:
             continue
 
-        # --- Calcul de l'angle d'attaque ---
-        # Projection de v_rel dans le plan perpendiculaire a axe_pale,
-        # puis decomposition en composante normale (portance) et tangentielle.
+        # --- Angle d'attaque ---
         v_rel_proj = v_rel - np.dot(v_rel, axe_pale) * axe_pale
         v_proj_mag = np.linalg.norm(v_rel_proj)
         if v_proj_mag < 1e-9:
@@ -107,29 +122,32 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
 
         v_n     = np.dot(v_rel_proj, n_plan)
         v_t_mag = np.sqrt(max(v_proj_mag**2 - v_n**2, 0.0))
-
-        alpha = np.degrees(np.arctan2(v_n, v_t_mag + 1e-9))
+        alpha   = np.degrees(np.arctan2(v_n, v_t_mag + 1e-9))
 
         Cl = float(Cl_p1d(alpha))
         Cd = float(Cd_p1d(alpha))
         q  = 0.5 * config.rho_air * V**2
 
-        # --- Direction de portance ---
-        # cross(axe_pale, v_rel) : perpendiculaire a v_rel ET a l'envergure.
+        # --- Portance ---
         lift_dir = np.cross(axe_pale, v_rel)
         ld_norm  = np.linalg.norm(lift_dir)
         if ld_norm < 1e-9:
             continue
         lift_dir = lift_dir / ld_norm
 
-        # Direction de trainee : opposee a la vitesse relative
+        # --- Trainee ---
         drag_dir = -v_rel / V
 
-        dF = q * e["dS"] * (Cl * lift_dir + Cd * drag_dir)
-        F_tot += dF
-        M_tot += np.cross(r_vec, dF)
+        dF_lift = q * e["dS"] * Cl * lift_dir
+        dF_drag = q * e["dS"] * Cd * drag_dir
 
-    return F_tot, M_tot
+        # Force totale : portance + trainee (pour la translation)
+        F_tot += dF_lift + dF_drag
+
+        # Moment de precession : portance SEULE autour du centre de masse
+        M_prec += np.cross(r_vec, dF_lift)
+
+    return F_tot, M_prec
 
 
 def plot_trajectory_3d(pos, title="Trajectoire du Boomerang"):
