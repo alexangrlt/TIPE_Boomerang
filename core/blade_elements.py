@@ -5,19 +5,35 @@ from core.xflr_data import load_data
 
 Cl_p1d, Cd_p1d = load_data("NACA_4420_T1_Re0.080_M0.00_N9.0.txt")
 
+# Twist lineaire de la pale : 0 deg a la racine, TWIST_TIP deg au bout
+# Un boomerang typique a ~10-15 deg de twist pour maintenir un alpha
+# constant le long de la pale malgre le gradient de vitesse r*omega
+TWIST_TIP = 12.0  # degres
+
 def get_blade_element(config):
     """
-    Retourne les troncons de chaque pale.
-    Chaque pale est definie par son angle (0 deg et 74 deg).
-    Les troncons vont du centre (r=0.005) jusqu'au bout (r=R_pale).
+    Retourne les troncons de chaque pale avec twist lineaire.
+
+    Chaque troncon contient :
+    - r        : position radiale (m)
+    - dr       : largeur du troncon (m)
+    - c        : corde locale (m)
+    - dS       : surface du troncon (m^2)
+    - angle_pale : angle de la pale dans le plan du boomerang (rad)
+    - vect_unit  : vecteur unitaire de l'envergure dans le repere boomerang
+    - twist      : angle de vrillage local (rad), positif = bord d'attaque monte
+
     Le desequilibre avancant/reculant emerge naturellement de
-    v_rel = v_cm + cross(omega, r_vec) : la pale qui avance
-    (vitesse translation dans le meme sens que la rotation)
-    a une vitesse relative plus grande => plus de portance.
+    v_rel = v_cm + cross(omega, r_vec).
+    Le twist compense partiellement la variation de vitesse le long de la pale
+    (comme une helice) pour maintenir un angle d'attaque plus uniforme.
     """
     r_values     = config.e
     dr           = r_values[1] - r_values[0]
     chord_values = np.linspace(config.c_root, config.c_tip, config.N_troncons)
+
+    # Twist lineaire : 0 a la racine, TWIST_TIP au bout
+    twist_values = np.linspace(0.0, np.radians(TWIST_TIP), config.N_troncons)
 
     elements = []
     for angle_deg in config.angles_pales:
@@ -33,5 +49,6 @@ def get_blade_element(config):
                 "dS":         dS,
                 "angle_pale": angle_rad,
                 "vect_unit":  vect_unit,
+                "twist":      twist_values[j],
             })
     return elements
