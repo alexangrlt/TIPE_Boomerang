@@ -7,18 +7,19 @@ from core.blade_elements import get_blade_element, Cl_p1d, Cd_p1d
 
 def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15):
     position = np.array(position_init, dtype=float)
-    vitesse = np.array(vitesse_init, dtype=float)
+    vitesse  = np.array(vitesse_init,  dtype=float)
     g = np.array([0.0, 0.0, -9.81])
 
-    # Plan du boomerang incliné à 80deg par rapport au sol
-    rot = R.from_euler("x", 80.0, degrees=True)
+    # Inclinaison autour de Y : coherent avec un lancer en +X
+    # Le plan du boomerang est quasi-vertical, legerement incline vers le haut-gauche
+    # (favorise la precession vers la gauche pour un droitier)
+    rot = R.from_euler('y', -80.0, degrees=True)
 
-    I = config.matrice_inertie()
+    I     = config.matrice_inertie()
     I_inv = np.linalg.inv(I)
 
-    # Rotation dans le sens anti-horaire vu du dessus (sens standard lancer droitier)
-    # omega positif autour de la normale au plan = sens qui crée précession vers +Y
-    omega_monde = rot.apply(np.array([0.0, 0.0, 130.0]))
+    # omega initial : ~1200 rpm = 125 rad/s autour de la normale au plan (axe Z corps)
+    omega_monde = rot.apply(np.array([0.0, 0.0, 125.0]))
 
     elements = get_blade_element(config)
 
@@ -34,36 +35,36 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         F_aero, M_monde = compute_forces_be(elements, vitesse, omega_monde, rot, config)
         F_tot = config.masse * g + F_aero
 
-        # Equation d'Euler dans le repère corps
-        rot_inv = rot.inv()
+        # Equation d'Euler dans le repere corps
+        rot_inv     = rot.inv()
         omega_corps = rot_inv.apply(omega_monde)
-        M_corps = rot_inv.apply(M_monde)
+        M_corps     = rot_inv.apply(M_monde)
 
         def domega(oc, mc):
             return I_inv @ (mc - np.cross(oc, I @ oc))
 
         # RK4 sur omega_corps
-        k1 = domega(omega_corps, M_corps)
-        k2 = domega(omega_corps + k1 * dt / 2, M_corps)
-        k3 = domega(omega_corps + k2 * dt / 2, M_corps)
-        k4 = domega(omega_corps + k3 * dt, M_corps)
-        omega_corps_new = omega_corps + (k1 + 2 * k2 + 2 * k3 + k4) * dt / 6
+        k1 = domega(omega_corps,             M_corps)
+        k2 = domega(omega_corps + k1 * dt/2, M_corps)
+        k3 = domega(omega_corps + k2 * dt/2, M_corps)
+        k4 = domega(omega_corps + k3 * dt,   M_corps)
+        omega_corps_new = omega_corps + (k1 + 2*k2 + 2*k3 + k4) * dt / 6
 
-        # Clamp spin
+        # Clamp spin (200 rad/s max ~ 1900 rpm)
         spd = np.linalg.norm(omega_corps_new)
-        if spd > 250.0:
-            omega_corps_new = omega_corps_new / spd * 250.0
+        if spd > 200.0:
+            omega_corps_new = omega_corps_new / spd * 200.0
 
         omega_monde = rot.apply(omega_corps_new)
 
-        # Integration translation
-        vitesse += (F_tot / config.masse) * dt
+        # Integration translation (Euler explicite)
+        vitesse  += (F_tot / config.masse) * dt
         position += vitesse * dt
 
-        # Mise à jour orientation
+        # Mise a jour orientation via vecteur de rotation instantane
         rot = R.from_rotvec(omega_monde * dt) * rot
 
-        # Renormalisation du quaternion toutes les 100 étapes
+        # Renormalisation du quaternion toutes les 100 etapes
         step += 1
         if step % 100 == 0:
             q = rot.as_quat()
@@ -84,42 +85,51 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
     F_tot = np.zeros(3)
     M_tot = np.zeros(3)
 
-    # Normale au plan du boomerang (repère monde)
-    # Pointe dans le sens du spin (convention droitier : vers haut-droite)
+    # Normale au plan du boomerang dans le repere monde
     n_plan = rot.apply(np.array([0.0, 0.0, 1.0]))
 
     for e in elements:
+        # Axe de la pale (envergure) exprime dans le repere monde
         axe_pale = rot.apply(e["vect_unit"])
-        r_vec = e["r"] * axe_pale
+        r_vec    = e["r"] * axe_pale
 
+        # Vitesse relative locale de l'element de pale
         v_rel = v_cm + np.cross(omega_monde, r_vec)
         V = np.linalg.norm(v_rel)
         if V < 0.5:
             continue
 
-        # Angle d'attaque
-        v_n = np.dot(v_rel, n_plan)
-        v_t = v_rel - v_n * n_plan
-        v_t_mag = np.linalg.norm(v_t)
+        # --- Calcul de l'angle d'attaque ---
+        # On projette v_rel dans le plan perpendiculaire a axe_pale,
+        # puis on decompose en composante normale (n_plan -> portance)
+        # et composante tangentielle (dans le plan -> trainee).
+        v_rel_proj = v_rel - np.dot(v_rel, axe_pale) * axe_pale
+        v_proj_mag = np.linalg.norm(v_rel_proj)
+        if v_proj_mag < 1e-9:
+            continue
+
+        v_n     = np.dot(v_rel_proj, n_plan)
+        v_t_mag = np.sqrt(max(v_proj_mag**2 - v_n**2, 0.0))
+
         alpha = np.degrees(np.arctan2(v_n, v_t_mag + 1e-9))
 
         Cl = float(Cl_p1d(alpha))
         Cd = float(Cd_p1d(alpha))
-        q = 0.5 * config.rho_air * V**2
+        q  = 0.5 * config.rho_air * V**2
 
-        # Portance : cross(v_rel, axe_pale), normalisé
-        # Ce vecteur est perpendiculaire à v_rel ET à l'envergure de la pale
-        lift_dir = np.cross(v_rel, axe_pale)
-        ld_norm = np.linalg.norm(lift_dir)
+        # --- Direction de portance ---
+        # L = (axe_pale x v_rel) norme : perpendiculaire a v_rel ET a l'envergure.
+        # Pas de correction de signe a posteriori : le signe de Cl gere le sens.
+        lift_dir = np.cross(axe_pale, v_rel)
+        ld_norm  = np.linalg.norm(lift_dir)
         if ld_norm < 1e-9:
             continue
         lift_dir = lift_dir / ld_norm
 
-        # La portance doit être du côté de n_plan (face aspirée du profil)
-        if np.dot(lift_dir, n_plan) < 0:
-            lift_dir = -lift_dir
+        # Direction de trainee : opposee a la vitesse relative
+        drag_dir = -v_rel / V
 
-        dF = q * e["dS"] * (Cl * lift_dir - Cd * v_rel / V)
+        dF = q * e["dS"] * (Cl * lift_dir + Cd * drag_dir)
         F_tot += dF
         M_tot += np.cross(r_vec, dF)
 
@@ -129,7 +139,7 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
 def plot_trajectory_3d(pos, title="Trajectoire du Boomerang"):
     pos = np.array(pos)
     fig = plt.figure()
-    ax = fig.add_subplot(projection="3d")
+    ax  = fig.add_subplot(projection="3d")
     ax.plot(pos[:, 0], pos[:, 1], pos[:, 2])
     ax.set_xlabel("X (m)")
     ax.set_ylabel("Y (m)")
@@ -140,7 +150,7 @@ def plot_trajectory_3d(pos, title="Trajectoire du Boomerang"):
 
 def plot_rot(rotation, title="Orientation du Boomerang"):
     fig = plt.figure()
-    ax = fig.add_subplot(projection="3d")
+    ax  = fig.add_subplot(projection="3d")
     ax.plot(rotation[:, 0], rotation[:, 1], rotation[:, 2])
     ax.set_xlabel("X (rad)")
     ax.set_ylabel("Y (rad)")
@@ -151,8 +161,8 @@ def plot_rot(rotation, title="Orientation du Boomerang"):
 
 def plot_angles(rotation, dt):
     rotations = [R.from_rotvec(v) for v in rotation]
-    angles = np.array([r.as_euler("xyz", degrees=True) for r in rotations])
-    t = np.arange(len(rotation)) * dt
+    angles    = np.array([r.as_euler("xyz", degrees=True) for r in rotations])
+    t         = np.arange(len(rotation)) * dt
     plt.figure()
     plt.plot(t, angles[:, 0], label="Roulis (X)")
     plt.plot(t, angles[:, 1], label="Tangage (Y)")
