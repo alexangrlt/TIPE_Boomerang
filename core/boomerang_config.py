@@ -36,9 +36,6 @@ class BoomerangConfig:
 
     # Parametres Aerodynamiques
     rho_air = 1.225  # densité de l'air en kg/m³
-    # Cx = 1.5  # coefficient de traînée                         #Je ne trouve aucune source donnant Cx (pour tester) donc en premiere approche j'ai pris le Cx de Corentin
-    # Cz = 0.45  # coefficient de portance initial               #https://www.math.uci.edu/~eesser/papers/justboom.pdf  ##y a un calcul a faire (ou plutot une experience....)
-    # Cm = 0.05  # coefficient de Magnus          #0.05 juste pr lancer la simu mais :je n'ai trouvé nulle part une valeur qui pourrait correspondre a mon boomerang et/ou un calcul pour arriver a cette valeur car elle se trouve par l'experience...
 
     @property
     def envergure(self):
@@ -50,31 +47,56 @@ class BoomerangConfig:
     def surface(self):
         """surface totale du boomerang"""
         return (self.c_root + self.c_tip) * self.R_pale  # calcul de surface, en m²
-    
+
     def matrice_inertie(self):
         """
-        2pales rectangulaires (pas vraiment mais je vais dire que c'est le cas prcq j'ai pas envie de faire la matrice d'inertie de la vraie forme...)
-        referentiel du boomerang avec z l'axe de rotation du boomerang
+        Tenseur d'inertie du boomerang : 2 pales rectangulaires.
+
+        CORRECTION (Steiner) : le tenseur de chaque pale est d'abord calcule dans
+        le repere de la pale (origine = centre de masse de la pale, non du boomerang),
+        puis transpose au centre du boomerang via le theoreme d'Huygens-Steiner :
+            I_total = I_cm_pale + m * (|d|^2 * Id - d dyadic d)
+        ou d est le vecteur entre le centre de masse de la pale et le centre du boomerang.
         """
-        m_pale = self.masse/2           #la masse du boomerang /2 soit la masse d'une pale
-        L=self.R_pale                   #la longueur de pale
-        c=(self.c_root+self.c_tip)/2    #moyenne de corde de la pale (moyenne assez grossiere en vraie...)
-        Ixx=1/12 * m_pale * c**2
-        Iyy=1/3 * m_pale * L**2         #huygens
-        Izz=Ixx+Iyy
-        I_pale_ref = np.diag([Ixx, Iyy, Izz])
+        m_pale = self.masse / 2          # masse d'une pale
+        L = self.R_pale                  # longueur de pale
+        c = (self.c_root + self.c_tip) / 2  # corde moyenne
+
+        # Inertie dans le repere propre de la pale (axe pale = axe Y local)
+        # Pale rectangulaire : Ixx = 1/12*m*c^2, Iyy = 1/3*m*L^2 (Huygens par rapport a la racine)
+        # Mais ici on veut I par rapport au CM de la pale, situe a L/2 de la racine :
+        # Ixx_cm = 1/12*m*c^2  (invariant : la corde est centree)
+        # Iyy_cm = 1/12*m*L^2  (barre mince : I_cm = 1/12*m*L^2)
+        # Izz_cm = Ixx_cm + Iyy_cm (theoreme de König pour profil mince)
+        Ixx_cm = 1.0/12.0 * m_pale * c**2
+        Iyy_cm = 1.0/12.0 * m_pale * L**2
+        Izz_cm = Ixx_cm + Iyy_cm
+        I_pale_cm = np.diag([Ixx_cm, Iyy_cm, Izz_cm])
 
         I_total = np.zeros((3, 3))
+
         for angle_deg in self.angles_pales:
             angle_rad = np.radians(angle_deg)
-            # Matrice de rotation autour de z
+
+            # Matrice de rotation autour de z (de la pale dans le repere boomerang)
             Rz = np.array([
                 [ np.cos(angle_rad), -np.sin(angle_rad), 0],
                 [ np.sin(angle_rad),  np.cos(angle_rad), 0],
-                [0,                   0,                  1]
+                [ 0,                  0,                  1]
             ])
-            # Rotation du tenseur : I_rotated = Rz @ I_pale_ref @ Rz.T
-            I_total += Rz @ I_pale_ref @ Rz.T
+
+            # Rotation du tenseur d'inertie au CM de la pale vers le repere boomerang
+            I_pale_rot = Rz @ I_pale_cm @ Rz.T
+
+            # Centre de masse de la pale dans le repere boomerang :
+            # la pale s'etend de 0 a R_pale dans sa direction -> CM a R_pale/2
+            d = Rz @ np.array([L / 2.0, 0.0, 0.0])
+
+            # Theoreme de Steiner : I_origine = I_cm + m*(|d|^2*Id3 - d x d^T)
+            d_sq = np.dot(d, d)
+            steiner = m_pale * (d_sq * np.eye(3) - np.outer(d, d))
+
+            I_total += I_pale_rot + steiner
 
         return I_total
 

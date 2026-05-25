@@ -10,14 +10,14 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     vitesse  = np.array(vitesse_init,  dtype=float)
     g = np.array([0.0, 0.0, -9.81])
 
-    # Inclinaison autour de Y : coherent avec un lancer en +X.
-    # -75 deg : le plan est quasi-vertical, legerement incline vers la gauche.
+    # Inclinaison autour de Y : plan quasi-vertical, legerement incline vers la gauche.
+    # -75 deg : coherent avec un lancer droitier en +X.
     rot = R.from_euler('y', -75.0, degrees=True)
 
     I     = config.matrice_inertie()
     I_inv = np.linalg.inv(I)
 
-    # omega initial : ~1450 rpm = 150 rad/s
+    # omega initial : ~1450 rpm = 150 rad/s autour de la normale au plan du boomerang
     omega_monde = rot.apply(np.array([0.0, 0.0, 150.0]))
 
     elements = get_blade_element(config)
@@ -52,20 +52,21 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         omega_corps_new = omega_corps + (k1 + 2*k2 + 2*k3 + k4) * dt / 6
 
         # Freinage aerodynamique du spin : tau realiste ~8s
-        # (un boomerang perd ~20-30% de son spin sur 10s de vol)
-        # Modelise comme un couple de freinage proportionnel a omega^2
-        # applique uniquement sur la composante axiale (autour de Z corps)
-        TAU_SPIN = 8.0  # secondes
+        TAU_SPIN = 8.0
         omega_corps_new[2] *= (1.0 - dt / TAU_SPIN)
 
-        omega_monde = rot.apply(omega_corps_new)
+        # --- CORRECTION 4 : coherence rotation/omega ---
+        # On integre la rotation avec omega MOYEN (debut + fin de pas) pour
+        # etre coherent avec le RK4 sur omega, au lieu d'Euler pur.
+        omega_monde_new = rot.apply(omega_corps_new)
+        omega_moy = 0.5 * (omega_monde + omega_monde_new)
+        rot = R.from_rotvec(omega_moy * dt) * rot
+
+        omega_monde = omega_monde_new
 
         # Integration translation
         vitesse  += (F_tot / config.masse) * dt
         position += vitesse * dt
-
-        # Mise a jour orientation
-        rot = R.from_rotvec(omega_monde * dt) * rot
 
         # Renormalisation quaternion toutes les 100 etapes
         step += 1
@@ -89,15 +90,15 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
     """
     Calcule les forces et moments aerodynamiques par la methode des elements de pale.
 
-    Retourne :
-    - F_tot : force totale (portance + trainee) utilisee pour la translation
-    - M_prec : moment de PRECESSION uniquement (portance seule)
+    CORRECTIONS APPLIQUEES :
+    1. Angle d'attaque calcule dans le repere de section correct (via axe_corde).
+    2. Le twist geometrique de chaque troncon est pris en compte dans alpha.
+    3. Direction de portance corrigee : perp. a v_rel_proj dans le plan de section,
+       sans composante parasite le long de l'envergure.
 
-    La trainee contribue a F_tot (ralentit la translation) mais PAS a M_prec.
-    En effet, le moment de trainee est principalement un freinage de spin
-    (couple autour de l'axe Z corps) qui est modelise separement avec une
-    constante de temps realiste (TAU_SPIN) pour eviter un effondrement brutal
-    du spin impossible physiquement.
+    Retourne :
+    - F_tot  : force totale (portance + trainee) pour la translation
+    - M_prec : moment de precession (portance seule) pour la rotation
     """
     F_tot  = np.zeros(3)
     M_prec = np.zeros(3)
@@ -114,37 +115,53 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
         if V < 0.5:
             continue
 
-        # --- Angle d'attaque ---
+        # --- CORRECTION 1 : angle d'attaque dans le plan de section ---
+        # On projette v_rel dans le plan perpendiculaire a l'axe de pale
+        # (plan de la section du profil NACA).
         v_rel_proj = v_rel - np.dot(v_rel, axe_pale) * axe_pale
         v_proj_mag = np.linalg.norm(v_rel_proj)
         if v_proj_mag < 1e-9:
             continue
 
-        v_n     = np.dot(v_rel_proj, n_plan)
-        v_t_mag = np.sqrt(max(v_proj_mag**2 - v_n**2, 0.0))
-        alpha   = np.degrees(np.arctan2(v_n, v_t_mag + 1e-9))
+        # axe_corde : direction de corde locale = perp. a axe_pale ET dans le plan du boomerang
+        # C'est l'axe par rapport auquel on mesure l'angle d'attaque.
+        axe_corde = np.cross(axe_pale, n_plan)
+        norme_corde = np.linalg.norm(axe_corde)
+        if norme_corde < 1e-9:
+            continue
+        axe_corde = axe_corde / norme_corde
+
+        # Composantes de v_rel_proj selon la corde et la normale au plan
+        v_chordwise = np.dot(v_rel_proj, axe_corde)   # composante dans le plan (chordwise)
+        v_normal    = np.dot(v_rel_proj, n_plan)       # composante normale au plan (epaisseur)
+
+        # Angle d'attaque aerodynamique
+        alpha_aero = np.degrees(np.arctan2(v_normal, abs(v_chordwise) + 1e-9))
+
+        # --- CORRECTION 2 : ajout du twist geometrique local ---
+        # Le twist modifie l'angle geometrique de la pale -> alpha effectif
+        alpha = alpha_aero + np.degrees(e["twist"])
 
         Cl = float(Cl_p1d(alpha))
         Cd = float(Cd_p1d(alpha))
         q  = 0.5 * config.rho_air * V**2
 
-        # --- Portance ---
-        lift_dir = np.cross(axe_pale, v_rel)
+        # --- CORRECTION 3 : direction de portance physiquement correcte ---
+        # La portance est perpendiculaire a v_rel_proj (dans le plan de section)
+        # et a axe_pale. Elle n'a donc pas de composante le long de l'envergure.
+        lift_dir = np.cross(v_rel_proj / v_proj_mag, axe_pale)
         ld_norm  = np.linalg.norm(lift_dir)
         if ld_norm < 1e-9:
             continue
         lift_dir = lift_dir / ld_norm
 
-        # --- Trainee ---
+        # Direction de trainee : opposee a la vitesse relative totale
         drag_dir = -v_rel / V
 
         dF_lift = q * e["dS"] * Cl * lift_dir
         dF_drag = q * e["dS"] * Cd * drag_dir
 
-        # Force totale : portance + trainee (pour la translation)
-        F_tot += dF_lift + dF_drag
-
-        # Moment de precession : portance SEULE autour du centre de masse
+        F_tot  += dF_lift + dF_drag
         M_prec += np.cross(r_vec, dF_lift)
 
     return F_tot, M_prec
