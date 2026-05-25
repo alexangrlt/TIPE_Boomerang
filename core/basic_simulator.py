@@ -10,22 +10,21 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     vitesse  = np.array(vitesse_init,  dtype=float)
     g = np.array([0.0, 0.0, -9.81])
 
-    # Inclinaison autour de Y : -80 deg (quasi-vertical, legerement plus dresse
-    # qu'avant). En pratique un lanceur droitier incline le plan a ~80-85 deg
-    # de l'horizontale pour favoriser la precession en debut de vol.
     rot = R.from_euler('y', -80.0, degrees=True)
 
     I     = config.matrice_inertie()
     I_inv = np.linalg.inv(I)
 
-    # omega initial : ~1450 rpm = 150 rad/s autour de la normale au plan du boomerang
     omega_monde = rot.apply(np.array([0.0, 0.0, 150.0]))
 
     elements = get_blade_element(config)
 
-    pos_list   = []
-    rot_list   = []
-    omega_list = []
+    pos_list    = []
+    rot_list    = []
+    omega_list  = []
+    vit_list    = []   # DIAG : vitesse du CM
+    F_aero_list = []   # DIAG : force aerodynamique totale
+    incl_list   = []   # DIAG : inclinaison du plan (angle entre n_plan et vertical)
     t    = 0.0
     step = 0
 
@@ -33,11 +32,17 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         pos_list.append(position.copy())
         rot_list.append(rot.as_rotvec())
         omega_list.append(np.linalg.norm(omega_monde))
+        vit_list.append(vitesse.copy())
+
+        # Inclinaison : angle entre la normale au plan du boomerang et la verticale
+        n_plan = rot.apply(np.array([0.0, 0.0, 1.0]))
+        incl   = np.degrees(np.arccos(np.clip(abs(np.dot(n_plan, [0, 0, 1])), 0, 1)))
+        incl_list.append(incl)
 
         F_aero, M_prec = compute_forces_be(elements, vitesse, omega_monde, rot, config)
+        F_aero_list.append(F_aero.copy())
         F_tot = config.masse * g + F_aero
 
-        # Equation d'Euler dans le repere corps
         rot_inv     = rot.inv()
         omega_corps = rot_inv.apply(omega_monde)
         M_corps     = rot_inv.apply(M_prec)
@@ -45,35 +50,24 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         def domega(oc, mc):
             return I_inv @ (mc - np.cross(oc, I @ oc))
 
-        # RK4 sur omega_corps
         k1 = domega(omega_corps,             M_corps)
         k2 = domega(omega_corps + k1 * dt/2, M_corps)
         k3 = domega(omega_corps + k2 * dt/2, M_corps)
         k4 = domega(omega_corps + k3 * dt,   M_corps)
         omega_corps_new = omega_corps + (k1 + 2*k2 + 2*k3 + k4) * dt / 6
 
-        # Freinage aerodynamique du spin.
-        # TAU_SPIN = 5s : plus realiste pour un boomerang PLA leger (28g).
-        # Un tau trop long (8s) maintient un spin fort mais ralentit la precession
-        # en fin de vol car omega_prec = M / (I_zz * omega_spin) -> quand omega_spin
-        # reste eleve, la precession reste lente si M_prec ne compense pas.
-        # Avec tau=5s le spin chute plus vite, M_prec/I_zz/omega_spin augmente
-        # en milieu de vol -> la boucle se ferme mieux.
         TAU_SPIN = 5.0
         omega_corps_new[2] *= (1.0 - dt / TAU_SPIN)
 
-        # Integration rotation avec omega moyen (coherence avec RK4)
         omega_monde_new = rot.apply(omega_corps_new)
         omega_moy = 0.5 * (omega_monde + omega_monde_new)
         rot = R.from_rotvec(omega_moy * dt) * rot
 
         omega_monde = omega_monde_new
 
-        # Integration translation
         vitesse  += (F_tot / config.masse) * dt
         position += vitesse * dt
 
-        # Renormalisation quaternion toutes les 100 etapes
         step += 1
         if step % 100 == 0:
             q = rot.as_quat()
@@ -81,36 +75,24 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
 
         t += dt
 
-    return (
-        [p[0] for p in pos_list],
-        [p[1] for p in pos_list],
-        [p[2] for p in pos_list],
-        pos_list,
-        np.array(rot_list),
-        np.array(omega_list),
-    )
+    return {
+        "px":     [p[0] for p in pos_list],
+        "py":     [p[1] for p in pos_list],
+        "pz":     [p[2] for p in pos_list],
+        "pos":    pos_list,
+        "rot":    np.array(rot_list),
+        "omega":  np.array(omega_list),
+        "vitesse": np.array(vit_list),
+        "F_aero": np.array(F_aero_list),
+        "incl":   np.array(incl_list),
+        "dt":     dt,
+    }
 
 
 def compute_forces_be(elements, v_cm, omega_monde, rot, config):
-    """
-    Calcule les forces et moments aerodynamiques par la methode des elements de pale.
-
-    CORRECTIONS APPLIQUEES :
-    1. Angle d'attaque calcule dans le repere de section correct (via axe_corde).
-    2. Le twist geometrique de chaque troncon est pris en compte dans alpha.
-    3. Direction de portance corrigee : perp. a v_rel_proj dans le plan de section.
-    4. Guard robuste sur axe_corde : quand le plan du boomerang devient quasi-
-       horizontal (fin de vol), axe_corde peut devenir colineaire a axe_pale.
-       On detecte ce cas et on skip le troncon proprement au lieu de diviser par zero.
-
-    Retourne :
-    - F_tot  : force totale (portance + trainee) pour la translation
-    - M_prec : moment de precession (portance seule) pour la rotation
-    """
     F_tot  = np.zeros(3)
     M_prec = np.zeros(3)
 
-    # Normale au plan du boomerang dans le repere monde
     n_plan = rot.apply(np.array([0.0, 0.0, 1.0]))
 
     for e in elements:
@@ -122,40 +104,30 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
         if V < 0.5:
             continue
 
-        # Projection dans le plan de section (perp. a l'envergure)
         v_rel_proj = v_rel - np.dot(v_rel, axe_pale) * axe_pale
         v_proj_mag = np.linalg.norm(v_rel_proj)
         if v_proj_mag < 1e-9:
             continue
 
-        # axe_corde : direction de corde locale = cross(axe_pale, n_plan)
-        # Guard robuste : si axe_pale ~ n_plan (plan boomerang horizontal),
-        # axe_corde devient quasi-nul. On utilise alors un axe de secours
-        # base sur la vitesse relative projetee pour ne pas perdre la portance.
         axe_corde_raw = np.cross(axe_pale, n_plan)
         norme_corde = np.linalg.norm(axe_corde_raw)
-        if norme_corde < 0.1:  # seuil plus robuste que 1e-9
-            # Plan quasi-horizontal : la corde est dans le plan horizontal.
-            # On prend la composante horizontale de v_rel_proj comme axe_corde.
+        if norme_corde < 0.1:
             axe_corde_raw = v_rel_proj - np.dot(v_rel_proj, n_plan) * n_plan
             norme_corde = np.linalg.norm(axe_corde_raw)
             if norme_corde < 1e-9:
                 continue
         axe_corde = axe_corde_raw / norme_corde
 
-        # Composantes de v_rel_proj dans le repere de section
         v_chordwise = np.dot(v_rel_proj, axe_corde)
         v_normal    = np.dot(v_rel_proj, n_plan)
 
-        # Angle d'attaque aerodynamique + twist geometrique local
         alpha_aero = np.degrees(np.arctan2(v_normal, abs(v_chordwise) + 1e-9))
-        alpha = alpha_aero + np.degrees(e["twist"])  # twist negatif au bout -> reduit alpha
+        alpha = alpha_aero + np.degrees(e["twist"])
 
         Cl = float(Cl_p1d(alpha))
         Cd = float(Cd_p1d(alpha))
         q  = 0.5 * config.rho_air * V**2
 
-        # Direction de portance : perp. a v_rel_proj ET a axe_pale
         lift_dir = np.cross(v_rel_proj / v_proj_mag, axe_pale)
         ld_norm  = np.linalg.norm(lift_dir)
         if ld_norm < 1e-9:
