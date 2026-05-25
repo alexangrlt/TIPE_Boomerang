@@ -10,9 +10,10 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     vitesse  = np.array(vitesse_init,  dtype=float)
     g = np.array([0.0, 0.0, -9.81])
 
-    # Inclinaison autour de Y : plan quasi-vertical, legerement incline vers la gauche.
-    # -75 deg : coherent avec un lancer droitier en +X.
-    rot = R.from_euler('y', -75.0, degrees=True)
+    # Inclinaison autour de Y : -80 deg (quasi-vertical, legerement plus dresse
+    # qu'avant). En pratique un lanceur droitier incline le plan a ~80-85 deg
+    # de l'horizontale pour favoriser la precession en debut de vol.
+    rot = R.from_euler('y', -80.0, degrees=True)
 
     I     = config.matrice_inertie()
     I_inv = np.linalg.inv(I)
@@ -51,13 +52,17 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         k4 = domega(omega_corps + k3 * dt,   M_corps)
         omega_corps_new = omega_corps + (k1 + 2*k2 + 2*k3 + k4) * dt / 6
 
-        # Freinage aerodynamique du spin : tau realiste ~8s
-        TAU_SPIN = 8.0
+        # Freinage aerodynamique du spin.
+        # TAU_SPIN = 5s : plus realiste pour un boomerang PLA leger (28g).
+        # Un tau trop long (8s) maintient un spin fort mais ralentit la precession
+        # en fin de vol car omega_prec = M / (I_zz * omega_spin) -> quand omega_spin
+        # reste eleve, la precession reste lente si M_prec ne compense pas.
+        # Avec tau=5s le spin chute plus vite, M_prec/I_zz/omega_spin augmente
+        # en milieu de vol -> la boucle se ferme mieux.
+        TAU_SPIN = 5.0
         omega_corps_new[2] *= (1.0 - dt / TAU_SPIN)
 
-        # --- CORRECTION 4 : coherence rotation/omega ---
-        # On integre la rotation avec omega MOYEN (debut + fin de pas) pour
-        # etre coherent avec le RK4 sur omega, au lieu d'Euler pur.
+        # Integration rotation avec omega moyen (coherence avec RK4)
         omega_monde_new = rot.apply(omega_corps_new)
         omega_moy = 0.5 * (omega_monde + omega_monde_new)
         rot = R.from_rotvec(omega_moy * dt) * rot
@@ -93,8 +98,10 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
     CORRECTIONS APPLIQUEES :
     1. Angle d'attaque calcule dans le repere de section correct (via axe_corde).
     2. Le twist geometrique de chaque troncon est pris en compte dans alpha.
-    3. Direction de portance corrigee : perp. a v_rel_proj dans le plan de section,
-       sans composante parasite le long de l'envergure.
+    3. Direction de portance corrigee : perp. a v_rel_proj dans le plan de section.
+    4. Guard robuste sur axe_corde : quand le plan du boomerang devient quasi-
+       horizontal (fin de vol), axe_corde peut devenir colineaire a axe_pale.
+       On detecte ce cas et on skip le troncon proprement au lieu de diviser par zero.
 
     Retourne :
     - F_tot  : force totale (portance + trainee) pour la translation
@@ -115,47 +122,46 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
         if V < 0.5:
             continue
 
-        # --- CORRECTION 1 : angle d'attaque dans le plan de section ---
-        # On projette v_rel dans le plan perpendiculaire a l'axe de pale
-        # (plan de la section du profil NACA).
+        # Projection dans le plan de section (perp. a l'envergure)
         v_rel_proj = v_rel - np.dot(v_rel, axe_pale) * axe_pale
         v_proj_mag = np.linalg.norm(v_rel_proj)
         if v_proj_mag < 1e-9:
             continue
 
-        # axe_corde : direction de corde locale = perp. a axe_pale ET dans le plan du boomerang
-        # C'est l'axe par rapport auquel on mesure l'angle d'attaque.
-        axe_corde = np.cross(axe_pale, n_plan)
-        norme_corde = np.linalg.norm(axe_corde)
-        if norme_corde < 1e-9:
-            continue
-        axe_corde = axe_corde / norme_corde
+        # axe_corde : direction de corde locale = cross(axe_pale, n_plan)
+        # Guard robuste : si axe_pale ~ n_plan (plan boomerang horizontal),
+        # axe_corde devient quasi-nul. On utilise alors un axe de secours
+        # base sur la vitesse relative projetee pour ne pas perdre la portance.
+        axe_corde_raw = np.cross(axe_pale, n_plan)
+        norme_corde = np.linalg.norm(axe_corde_raw)
+        if norme_corde < 0.1:  # seuil plus robuste que 1e-9
+            # Plan quasi-horizontal : la corde est dans le plan horizontal.
+            # On prend la composante horizontale de v_rel_proj comme axe_corde.
+            axe_corde_raw = v_rel_proj - np.dot(v_rel_proj, n_plan) * n_plan
+            norme_corde = np.linalg.norm(axe_corde_raw)
+            if norme_corde < 1e-9:
+                continue
+        axe_corde = axe_corde_raw / norme_corde
 
-        # Composantes de v_rel_proj selon la corde et la normale au plan
-        v_chordwise = np.dot(v_rel_proj, axe_corde)   # composante dans le plan (chordwise)
-        v_normal    = np.dot(v_rel_proj, n_plan)       # composante normale au plan (epaisseur)
+        # Composantes de v_rel_proj dans le repere de section
+        v_chordwise = np.dot(v_rel_proj, axe_corde)
+        v_normal    = np.dot(v_rel_proj, n_plan)
 
-        # Angle d'attaque aerodynamique
+        # Angle d'attaque aerodynamique + twist geometrique local
         alpha_aero = np.degrees(np.arctan2(v_normal, abs(v_chordwise) + 1e-9))
-
-        # --- CORRECTION 2 : ajout du twist geometrique local ---
-        # Le twist modifie l'angle geometrique de la pale -> alpha effectif
-        alpha = alpha_aero + np.degrees(e["twist"])
+        alpha = alpha_aero + np.degrees(e["twist"])  # twist negatif au bout -> reduit alpha
 
         Cl = float(Cl_p1d(alpha))
         Cd = float(Cd_p1d(alpha))
         q  = 0.5 * config.rho_air * V**2
 
-        # --- CORRECTION 3 : direction de portance physiquement correcte ---
-        # La portance est perpendiculaire a v_rel_proj (dans le plan de section)
-        # et a axe_pale. Elle n'a donc pas de composante le long de l'envergure.
+        # Direction de portance : perp. a v_rel_proj ET a axe_pale
         lift_dir = np.cross(v_rel_proj / v_proj_mag, axe_pale)
         ld_norm  = np.linalg.norm(lift_dir)
         if ld_norm < 1e-9:
             continue
         lift_dir = lift_dir / ld_norm
 
-        # Direction de trainee : opposee a la vitesse relative totale
         drag_dir = -v_rel / V
 
         dF_lift = q * e["dS"] * Cl * lift_dir
