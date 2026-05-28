@@ -10,12 +10,12 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     vitesse  = np.array(vitesse_init,  dtype=float)
     g = np.array([0.0, 0.0, -9.81])
 
-    rot = R.from_euler('y', -30.0, degrees=True)
+    rot = R.from_euler('y', -80.0, degrees=True)
 
     I     = config.matrice_inertie()
     I_inv = np.linalg.inv(I)
 
-    omega_monde = rot.apply(np.array([0.0, 0.0, +150.0]))
+    omega_monde = rot.apply(np.array([0.0, 0.0, 150.0]))
 
     elements = get_blade_element(config)
 
@@ -69,9 +69,7 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         position += vitesse * dt
 
         step += 1
-        # FIX bug 4 : renormalisation tous les 10 pas au lieu de 100
-        # pour limiter la derive numerique du quaternion (omega~150 rad/s, dt=0.0005
-        # => ~0.075 rad/pas, derive non negligeable sur 100 pas)
+        # Renormalisation tous les 10 pas pour limiter la derive numerique du quaternion
         if step % 10 == 0:
             q = rot.as_quat()
             rot = R.from_quat(q / np.linalg.norm(q))
@@ -93,6 +91,18 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
 
 
 def compute_forces_be(elements, v_cm, omega_monde, rot, config):
+    """
+    Calcul des forces et moments aerodynamiques par la methode des elements de pale (BEM).
+
+    Corrections appliquees :
+    - La pression dynamique q est calculee sur v_proj_mag (vitesse dans le plan
+      de la section), coherent avec la theorie 2D du profil.
+    - L'angle d'attaque utilise abs() pour eviter les sauts de quadrant, puis
+      copysign pour conserver le signe physique du flux normal.
+    - alpha est borne a [-20, 20] deg pour rester dans la plage valide des polaires.
+    - La trainee est opposee a v_rel_proj (dans le plan de la section), pas a v_rel 3D.
+    - Le moment de precession inclut portance ET trainee.
+    """
     F_tot  = np.zeros(3)
     M_prec = np.zeros(3)
 
@@ -103,37 +113,34 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
         r_vec    = e["r"] * axe_pale
 
         v_rel = v_cm + np.cross(omega_monde, r_vec)
-        V = np.linalg.norm(v_rel)
-        if V < 0.5:
-            continue
 
+        # Composante utile pour le profil : vitesse perpendiculaire a l'envergure
         v_rel_proj = v_rel - np.dot(v_rel, axe_pale) * axe_pale
         v_proj_mag = np.linalg.norm(v_rel_proj)
-        if v_proj_mag < 1e-9:
+        if v_proj_mag < 0.5:
             continue
 
         axe_corde_raw = np.cross(axe_pale, n_plan)
-        norme_corde = np.linalg.norm(axe_corde_raw)
-        if norme_corde < 0.1:
-            axe_corde_raw = v_rel_proj - np.dot(v_rel_proj, n_plan) * n_plan
-            norme_corde = np.linalg.norm(axe_corde_raw)
-            if norme_corde < 1e-9:
-                continue
+        norme_corde   = np.linalg.norm(axe_corde_raw)
+        if norme_corde < 1e-9:
+            continue
         axe_corde = axe_corde_raw / norme_corde
 
         v_chordwise = np.dot(v_rel_proj, axe_corde)
         v_normal    = np.dot(v_rel_proj, n_plan)
 
-        # FIX bug 3 : suppression du abs() sur v_chordwise pour conserver
-        # le signe et distinguer la pale avancante de la pale en retraite.
-        # Un v_chordwise negatif (pale en retraite) donne un alpha negatif
-        # ou signe inverse, ce qui est physiquement correct.
-        alpha_aero = np.degrees(np.arctan2(v_normal, v_chordwise + 1e-9))
-        alpha = alpha_aero + np.degrees(e["twist"])
+        # Angle d'attaque : magnitude sans saut de quadrant, signe porte par v_normal
+        alpha_mag  = np.degrees(np.arctan2(abs(v_normal), abs(v_chordwise) + 1e-9))
+        alpha_aero = np.copysign(alpha_mag, v_normal)
+        alpha      = alpha_aero + np.degrees(e["twist"])
+        # Bornage dans la plage valide des polaires XFLR5
+        alpha      = np.clip(alpha, -20.0, 20.0)
 
         Cl = float(Cl_p1d(alpha))
         Cd = float(Cd_p1d(alpha))
-        q  = 0.5 * config.rho_air * V**2
+
+        # Pression dynamique sur la vitesse 2D de la section (coherent BEM)
+        q = 0.5 * config.rho_air * v_proj_mag**2
 
         lift_dir = np.cross(v_rel_proj / v_proj_mag, axe_pale)
         ld_norm  = np.linalg.norm(lift_dir)
@@ -141,20 +148,16 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
             continue
         lift_dir = lift_dir / ld_norm
 
-        # FIX bug 1 : la trainee est opposee a la vitesse relative DANS LE PLAN
-        # de la section (v_rel_proj), pas a la vitesse 3D totale (v_rel).
-        # Utiliser v_rel introduisait une composante axiale (le long de l'envergure)
-        # inexistante en theorie BEM et qui perturbait le couple de precession.
+        # Trainee dans le plan de la section (BEM 2D), pas sur v_rel 3D
         drag_dir = -v_rel_proj / v_proj_mag
 
         dF_lift = q * e["dS"] * Cl * lift_dir
         dF_drag = q * e["dS"] * Cd * drag_dir
 
-        F_tot  += dF_lift + dF_drag
-        # FIX bug 2 : le moment de precession inclut la trainee.
-        # La trainee en bout de pale cree un couple gyroscopique non negligeable
-        # qui contribue au virage. Ne compter que dF_lift sous-estimait la precession.
-        M_prec += np.cross(r_vec, dF_lift + dF_drag)
+        dF = dF_lift + dF_drag
+        F_tot  += dF
+        # Moment de precession : portance + trainee
+        M_prec += np.cross(r_vec, dF)
 
     return F_tot, M_prec
 
