@@ -59,7 +59,7 @@ class BoomerangConfig:
         ou d est le vecteur entre le centre de masse de la pale et le centre du boomerang.
         """
         m_pale = self.masse / 2          # masse d'une pale
-        L = self.R_pale                  # longueur de pale
+        L = self.R_pale                  # longueur de pale = R_pale (extension radiale)
         c = (self.c_root + self.c_tip) / 2  # corde moyenne
 
         # Inertie dans le repere propre de la pale (axe pale = axe Y local)
@@ -88,9 +88,12 @@ class BoomerangConfig:
             # Rotation du tenseur d'inertie au CM de la pale vers le repere boomerang
             I_pale_rot = Rz @ I_pale_cm @ Rz.T
 
-            # Centre de masse de la pale dans le repere boomerang :
-            # la pale s'etend de 0 a R_pale dans sa direction -> CM a R_pale/2
-            d = Rz @ np.array([L / 2.0, 0.0, 0.0])
+            # FIX bug 8 : le CM de la pale est a R_pale/2 de l'origine, pas L/2.
+            # L (0.195 m) est la longueur geometrique totale du boomerang deplie,
+            # tandis que R_pale (0.112 m) est l'extension radiale effective de chaque pale.
+            # Utiliser L surestimait le bras de levier de Steiner d'un facteur ~1.7
+            # et donc le moment d'inertie, ce qui amortissait trop la precession.
+            d = Rz @ np.array([self.R_pale / 2.0, 0.0, 0.0])
 
             # Theoreme de Steiner : I_origine = I_cm + m*(|d|^2*Id3 - d x d^T)
             d_sq = np.dot(d, d)

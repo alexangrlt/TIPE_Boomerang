@@ -69,7 +69,10 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         position += vitesse * dt
 
         step += 1
-        if step % 100 == 0:
+        # FIX bug 4 : renormalisation tous les 10 pas au lieu de 100
+        # pour limiter la derive numerique du quaternion (omega~150 rad/s, dt=0.0005
+        # => ~0.075 rad/pas, derive non negligeable sur 100 pas)
+        if step % 10 == 0:
             q = rot.as_quat()
             rot = R.from_quat(q / np.linalg.norm(q))
 
@@ -121,7 +124,11 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
         v_chordwise = np.dot(v_rel_proj, axe_corde)
         v_normal    = np.dot(v_rel_proj, n_plan)
 
-        alpha_aero = np.degrees(np.arctan2(v_normal, abs(v_chordwise) + 1e-9))
+        # FIX bug 3 : suppression du abs() sur v_chordwise pour conserver
+        # le signe et distinguer la pale avancante de la pale en retraite.
+        # Un v_chordwise negatif (pale en retraite) donne un alpha negatif
+        # ou signe inverse, ce qui est physiquement correct.
+        alpha_aero = np.degrees(np.arctan2(v_normal, v_chordwise + 1e-9))
         alpha = alpha_aero + np.degrees(e["twist"])
 
         Cl = float(Cl_p1d(alpha))
@@ -134,13 +141,20 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
             continue
         lift_dir = lift_dir / ld_norm
 
-        drag_dir = -v_rel / V
+        # FIX bug 1 : la trainee est opposee a la vitesse relative DANS LE PLAN
+        # de la section (v_rel_proj), pas a la vitesse 3D totale (v_rel).
+        # Utiliser v_rel introduisait une composante axiale (le long de l'envergure)
+        # inexistante en theorie BEM et qui perturbait le couple de precession.
+        drag_dir = -v_rel_proj / v_proj_mag
 
         dF_lift = q * e["dS"] * Cl * lift_dir
         dF_drag = q * e["dS"] * Cd * drag_dir
 
         F_tot  += dF_lift + dF_drag
-        M_prec += np.cross(r_vec, dF_lift)
+        # FIX bug 2 : le moment de precession inclut la trainee.
+        # La trainee en bout de pale cree un couple gyroscopique non negligeable
+        # qui contribue au virage. Ne compter que dF_lift sous-estimait la precession.
+        M_prec += np.cross(r_vec, dF_lift + dF_drag)
 
     return F_tot, M_prec
 
