@@ -8,7 +8,7 @@ res = simulate_projectile(
     np.array([20.0, 0.0, 1.0]),
     Boomerang_standard,
     dt=0.0002,
-    t_max=15,
+    t_max=20,
 )
 
 plot_trajectory_3d(res["pos"])
