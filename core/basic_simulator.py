@@ -10,12 +10,12 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     vitesse  = np.array(vitesse_init,  dtype=float)
     g = np.array([0.0, 0.0, -9.81])
 
-    rot = R.from_euler('y', -80.0, degrees=True)
+    rot = R.from_euler('y', 20.0, degrees=True)
 
     I     = config.matrice_inertie()
     I_inv = np.linalg.inv(I)
 
-    omega_monde = rot.apply(np.array([0.0, 0.0, 150.0]))
+    omega_monde = rot.apply(np.array([0.0, 0.0, -150.0]))
 
     elements = get_blade_element(config)
 
