@@ -10,17 +10,13 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     vitesse  = np.array(vitesse_init,  dtype=float)
     g = np.array([0.0, 0.0, -9.81])
 
-    # Orientation initiale : boomerang incline de 20 deg vers la droite
-    # (rotation autour de X, axe de lancer = +X).
-    # Un lanceur droitier tient le boomerang quasi vertical avec un leger tilt
-    # vers la droite : c'est une rotation positive autour de X dans notre repere.
+    # Orientation initiale : incline de 20 deg vers la droite (autour de X)
     rot = R.from_euler('x', 20.0, degrees=True)
 
     I     = config.matrice_inertie()
     I_inv = np.linalg.inv(I)
 
-    # Spin anti-horaire vu du dessus (+z monde) pour un boomerang droitier.
-    # Le spin est exprime dans le repere corps puis projete en repere monde.
+    # Spin anti-horaire vu du dessus pour un boomerang droitier
     omega_monde = rot.apply(np.array([0.0, 0.0, 150.0]))
 
     elements = get_blade_element(config)
@@ -34,8 +30,6 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     t    = 0.0
     step = 0
 
-    # Coefficient de couple resistant de rotation (trainee orbitale des pales)
-    # k_drag = 0.5 * rho * Cd * c_moy * n_pales * (R_pale^4 - r0^4) / 4
     Cd_moy  = 0.02
     c_moy   = (config.c_root + config.c_tip) / 2.0
     r0      = 0.005
@@ -43,13 +37,25 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     k_drag  = (0.5 * config.rho_air * Cd_moy * c_moy * n_pales
                * (config.R_pale**4 - r0**4) / 4.0)
 
+    # Pre-calcul des axes de corde dans le repere corps (invariants)
+    # axe_corde_corps = z_corps x axe_pale_corps, normalise
+    # Cela donne la direction dans le plan de la pale perpendiculaire a l'envergure
+    z_corps = np.array([0.0, 0.0, 1.0])
+    for e in elements:
+        ac_raw = np.cross(z_corps, e["vect_unit"])
+        norme  = np.linalg.norm(ac_raw)
+        if norme < 1e-9:
+            ac_raw = np.array([1.0, 0.0, 0.0])
+            norme  = 1.0
+        e["axe_corde_corps"] = ac_raw / norme
+
     while t < t_max and position[2] >= 0.0:
         pos_list.append(position.copy())
         rot_list.append(rot.as_rotvec())
         omega_list.append(np.linalg.norm(omega_monde))
         vit_list.append(vitesse.copy())
 
-        n_plan = rot.apply(np.array([0.0, 0.0, 1.0]))
+        n_plan = rot.apply(z_corps)
         incl   = np.degrees(np.arccos(np.clip(abs(np.dot(n_plan, [0, 0, 1])), 0, 1)))
         incl_list.append(incl)
 
@@ -60,7 +66,6 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         omega_corps = rot_inv.apply(omega_monde)
         M_corps     = rot_inv.apply(M_prec)
 
-        # Couple resistant physique : trainee de rotation autour de l'axe z corps
         oz             = omega_corps[2]
         M_resist_corps = np.array([0.0, 0.0, -k_drag * oz * abs(oz)])
         M_corps_total  = M_corps + M_resist_corps
@@ -77,7 +82,6 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         omega_monde_new = rot.apply(omega_corps_new)
         omega_moy = 0.5 * (omega_monde + omega_monde_new)
         rot = R.from_rotvec(omega_moy * dt) * rot
-
         omega_monde = omega_monde_new
 
         F_tot    = config.masse * g + F_aero
@@ -107,11 +111,15 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
 
 def compute_forces_be(elements, v_cm, omega_monde, rot, config):
     """
-    Calcul des forces et moments aerodynamiques par la methode des elements de pale (BEM).
+    Calcul BEM des forces et moments aerodynamiques.
 
-    - q calculee sur v_proj_mag (vitesse 2D dans le plan de la section)
-    - alpha avec copysign, borne a [-20, 20] deg
-    - trainee opposee a v_rel_proj (BEM 2D)
+    Corrections cles :
+    - axe_corde calcule geometriquement dans le repere corps (z_corps x axe_pale_corps),
+      puis projete en monde. Independant de n_plan monde -> alpha correct en toute orientation.
+    - v_normal = composante de v_rel_proj selon n_plan (normale au disque)
+    - v_chordwise = composante selon axe_corde monde
+    - q sur v_proj_mag (BEM 2D coherent)
+    - alpha borne [-20, 20] deg
     - moment de precession = portance + trainee
     """
     F_tot  = np.zeros(3)
@@ -120,21 +128,18 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
     n_plan = rot.apply(np.array([0.0, 0.0, 1.0]))
 
     for e in elements:
-        axe_pale = rot.apply(e["vect_unit"])
-        r_vec    = e["r"] * axe_pale
+        axe_pale  = rot.apply(e["vect_unit"])
+        # Axe de corde projete en monde depuis le repere corps (geometrique, stable)
+        axe_corde = rot.apply(e["axe_corde_corps"])
 
+        r_vec = e["r"] * axe_pale
         v_rel = v_cm + np.cross(omega_monde, r_vec)
 
+        # Vitesse dans le plan de la section (perpendiculaire a l'envergure)
         v_rel_proj = v_rel - np.dot(v_rel, axe_pale) * axe_pale
         v_proj_mag = np.linalg.norm(v_rel_proj)
         if v_proj_mag < 0.5:
             continue
-
-        axe_corde_raw = np.cross(axe_pale, n_plan)
-        norme_corde   = np.linalg.norm(axe_corde_raw)
-        if norme_corde < 1e-9:
-            continue
-        axe_corde = axe_corde_raw / norme_corde
 
         v_chordwise = np.dot(v_rel_proj, axe_corde)
         v_normal    = np.dot(v_rel_proj, n_plan)
