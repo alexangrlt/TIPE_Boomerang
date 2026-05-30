@@ -28,6 +28,16 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     t    = 0.0
     step = 0
 
+    # Coefficient de couple resistant de rotation (trainee orbitale des pales)
+    # k_drag = 0.5 * rho * Cd * c_moy * n_pales * integrale(r^3 dr) sur [r0, R_pale]
+    # = 0.5 * rho * Cd * c_moy * n_pales * (R_pale^4 - r0^4) / 4
+    Cd_moy  = 0.02
+    c_moy   = (config.c_root + config.c_tip) / 2.0
+    r0      = 0.005
+    n_pales = len(config.angles_pales)
+    k_drag  = (0.5 * config.rho_air * Cd_moy * c_moy * n_pales
+               * (config.R_pale**4 - r0**4) / 4.0)
+
     while t < t_max and position[2] >= 0.0:
         pos_list.append(position.copy())
         rot_list.append(rot.as_rotvec())
@@ -41,30 +51,13 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         F_aero, M_prec = compute_forces_be(elements, vitesse, omega_monde, rot, config)
         F_aero_list.append(F_aero.copy())
 
-        # Couple résistant physique dû à la traînée de rotation.
-        # Chaque élément de pale en rotation crée une traînée opposée à son mouvement
-        # orbital. On modélise ce couple par :
-        #   M_resist = -k_drag * omega_corps_z * |omega_corps_z| * e_z
-        # avec k_drag estimé à partir de la géométrie et de la polaire :
-        #   k_drag ~ 0.5 * rho * Cd_moy * corde_moy * intégrale(r² dr) sur l'envergure
-        # C'est plus physique que le TAU_SPIN ad hoc et reproduit l'amortissement
-        # progressif observé sur un vrai boomerang.
-        rot_inv      = rot.inv()
-        omega_corps  = rot_inv.apply(omega_monde)
-        M_corps      = rot_inv.apply(M_prec)
+        rot_inv     = rot.inv()
+        omega_corps = rot_inv.apply(omega_monde)
+        M_corps     = rot_inv.apply(M_prec)
 
-        # Paramètres géométriques pour le couple résistant
-        # Intégrale approchée de r^3 sur une pale : (R_pale^4 - r0^4) / 4
-        R_pale = config.R_pale
-        r0     = 0.005          # rayon minimal des éléments
-        Cd_moy = 0.02           # Cd de profil à faible alpha (traînée de friction)
-        c_moy  = config.corde   # corde moyenne
-        n_pales = config.n_pales
-        k_drag = (0.5 * config.rho_air * Cd_moy * c_moy * n_pales
-                  * (R_pale**4 - r0**4) / 4.0)
-
-        # Couple résistant en repère corps (autour de l'axe de rotation z)
-        oz  = omega_corps[2]
+        # Couple resistant physique : trainee de rotation autour de l'axe z corps
+        # M_resist = -k_drag * omega_z * |omega_z|  (quadratique comme la trainee)
+        oz             = omega_corps[2]
         M_resist_corps = np.array([0.0, 0.0, -k_drag * oz * abs(oz)])
         M_corps_total  = M_corps + M_resist_corps
 
@@ -88,7 +81,7 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         position += vitesse * dt
 
         step += 1
-        # Renormalisation tous les 5 pas — limite la dérive numérique du quaternion
+        # Renormalisation tous les 5 pas : limite la derive numerique du quaternion
         if step % 5 == 0:
             q = rot.as_quat()
             rot = R.from_quat(q / np.linalg.norm(q))
@@ -111,12 +104,12 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
 
 def compute_forces_be(elements, v_cm, omega_monde, rot, config):
     """
-    Calcul des forces et moments aérodynamiques par la méthode des éléments de pale (BEM).
+    Calcul des forces et moments aerodynamiques par la methode des elements de pale (BEM).
 
-    - q calculée sur v_proj_mag (vitesse 2D dans le plan de la section)
-    - alpha avec copysign pour conserver le signe physique, borné à [-20, 20] deg
-    - traînée opposée à v_rel_proj (plan section, BEM 2D)
-    - moment de précession = portance + traînée
+    - q calculee sur v_proj_mag (vitesse 2D dans le plan de la section)
+    - alpha avec copysign pour conserver le signe physique, borne a [-20, 20] deg
+    - trainee opposee a v_rel_proj (plan section, BEM 2D)
+    - moment de precession = portance + trainee
     """
     F_tot  = np.zeros(3)
     M_prec = np.zeros(3)
