@@ -22,9 +22,9 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     pos_list    = []
     rot_list    = []
     omega_list  = []
-    vit_list    = []   # DIAG : vitesse du CM
-    F_aero_list = []   # DIAG : force aerodynamique totale
-    incl_list   = []   # DIAG : inclinaison du plan (angle entre n_plan et vertical)
+    vit_list    = []
+    F_aero_list = []
+    incl_list   = []
     t    = 0.0
     step = 0
 
@@ -34,30 +34,48 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         omega_list.append(np.linalg.norm(omega_monde))
         vit_list.append(vitesse.copy())
 
-        # Inclinaison : angle entre la normale au plan du boomerang et la verticale
         n_plan = rot.apply(np.array([0.0, 0.0, 1.0]))
         incl   = np.degrees(np.arccos(np.clip(abs(np.dot(n_plan, [0, 0, 1])), 0, 1)))
         incl_list.append(incl)
 
         F_aero, M_prec = compute_forces_be(elements, vitesse, omega_monde, rot, config)
         F_aero_list.append(F_aero.copy())
-        F_tot = config.masse * g + F_aero
 
-        rot_inv     = rot.inv()
-        omega_corps = rot_inv.apply(omega_monde)
-        M_corps     = rot_inv.apply(M_prec)
+        # Couple résistant physique dû à la traînée de rotation.
+        # Chaque élément de pale en rotation crée une traînée opposée à son mouvement
+        # orbital. On modélise ce couple par :
+        #   M_resist = -k_drag * omega_corps_z * |omega_corps_z| * e_z
+        # avec k_drag estimé à partir de la géométrie et de la polaire :
+        #   k_drag ~ 0.5 * rho * Cd_moy * corde_moy * intégrale(r² dr) sur l'envergure
+        # C'est plus physique que le TAU_SPIN ad hoc et reproduit l'amortissement
+        # progressif observé sur un vrai boomerang.
+        rot_inv      = rot.inv()
+        omega_corps  = rot_inv.apply(omega_monde)
+        M_corps      = rot_inv.apply(M_prec)
+
+        # Paramètres géométriques pour le couple résistant
+        # Intégrale approchée de r^3 sur une pale : (R_pale^4 - r0^4) / 4
+        R_pale = config.R_pale
+        r0     = 0.005          # rayon minimal des éléments
+        Cd_moy = 0.02           # Cd de profil à faible alpha (traînée de friction)
+        c_moy  = config.corde   # corde moyenne
+        n_pales = config.n_pales
+        k_drag = (0.5 * config.rho_air * Cd_moy * c_moy * n_pales
+                  * (R_pale**4 - r0**4) / 4.0)
+
+        # Couple résistant en repère corps (autour de l'axe de rotation z)
+        oz  = omega_corps[2]
+        M_resist_corps = np.array([0.0, 0.0, -k_drag * oz * abs(oz)])
+        M_corps_total  = M_corps + M_resist_corps
 
         def domega(oc, mc):
             return I_inv @ (mc - np.cross(oc, I @ oc))
 
-        k1 = domega(omega_corps,             M_corps)
-        k2 = domega(omega_corps + k1 * dt/2, M_corps)
-        k3 = domega(omega_corps + k2 * dt/2, M_corps)
-        k4 = domega(omega_corps + k3 * dt,   M_corps)
+        k1 = domega(omega_corps,             M_corps_total)
+        k2 = domega(omega_corps + k1 * dt/2, M_corps_total)
+        k3 = domega(omega_corps + k2 * dt/2, M_corps_total)
+        k4 = domega(omega_corps + k3 * dt,   M_corps_total)
         omega_corps_new = omega_corps + (k1 + 2*k2 + 2*k3 + k4) * dt / 6
-
-        TAU_SPIN = 5.0
-        omega_corps_new[2] *= (1.0 - dt / TAU_SPIN)
 
         omega_monde_new = rot.apply(omega_corps_new)
         omega_moy = 0.5 * (omega_monde + omega_monde_new)
@@ -65,12 +83,13 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
 
         omega_monde = omega_monde_new
 
+        F_tot    = config.masse * g + F_aero
         vitesse  += (F_tot / config.masse) * dt
         position += vitesse * dt
 
         step += 1
-        # Renormalisation tous les 10 pas pour limiter la derive numerique du quaternion
-        if step % 10 == 0:
+        # Renormalisation tous les 5 pas — limite la dérive numérique du quaternion
+        if step % 5 == 0:
             q = rot.as_quat()
             rot = R.from_quat(q / np.linalg.norm(q))
 
@@ -92,16 +111,12 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
 
 def compute_forces_be(elements, v_cm, omega_monde, rot, config):
     """
-    Calcul des forces et moments aerodynamiques par la methode des elements de pale (BEM).
+    Calcul des forces et moments aérodynamiques par la méthode des éléments de pale (BEM).
 
-    Corrections appliquees :
-    - La pression dynamique q est calculee sur v_proj_mag (vitesse dans le plan
-      de la section), coherent avec la theorie 2D du profil.
-    - L'angle d'attaque utilise abs() pour eviter les sauts de quadrant, puis
-      copysign pour conserver le signe physique du flux normal.
-    - alpha est borne a [-20, 20] deg pour rester dans la plage valide des polaires.
-    - La trainee est opposee a v_rel_proj (dans le plan de la section), pas a v_rel 3D.
-    - Le moment de precession inclut portance ET trainee.
+    - q calculée sur v_proj_mag (vitesse 2D dans le plan de la section)
+    - alpha avec copysign pour conserver le signe physique, borné à [-20, 20] deg
+    - traînée opposée à v_rel_proj (plan section, BEM 2D)
+    - moment de précession = portance + traînée
     """
     F_tot  = np.zeros(3)
     M_prec = np.zeros(3)
@@ -114,7 +129,6 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
 
         v_rel = v_cm + np.cross(omega_monde, r_vec)
 
-        # Composante utile pour le profil : vitesse perpendiculaire a l'envergure
         v_rel_proj = v_rel - np.dot(v_rel, axe_pale) * axe_pale
         v_proj_mag = np.linalg.norm(v_rel_proj)
         if v_proj_mag < 0.5:
@@ -129,17 +143,14 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
         v_chordwise = np.dot(v_rel_proj, axe_corde)
         v_normal    = np.dot(v_rel_proj, n_plan)
 
-        # Angle d'attaque : magnitude sans saut de quadrant, signe porte par v_normal
         alpha_mag  = np.degrees(np.arctan2(abs(v_normal), abs(v_chordwise) + 1e-9))
         alpha_aero = np.copysign(alpha_mag, v_normal)
         alpha      = alpha_aero + np.degrees(e["twist"])
-        # Bornage dans la plage valide des polaires XFLR5
         alpha      = np.clip(alpha, -20.0, 20.0)
 
         Cl = float(Cl_p1d(alpha))
         Cd = float(Cd_p1d(alpha))
 
-        # Pression dynamique sur la vitesse 2D de la section (coherent BEM)
         q = 0.5 * config.rho_air * v_proj_mag**2
 
         lift_dir = np.cross(v_rel_proj / v_proj_mag, axe_pale)
@@ -148,7 +159,6 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
             continue
         lift_dir = lift_dir / ld_norm
 
-        # Trainee dans le plan de la section (BEM 2D), pas sur v_rel 3D
         drag_dir = -v_rel_proj / v_proj_mag
 
         dF_lift = q * e["dS"] * Cl * lift_dir
@@ -156,7 +166,6 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
 
         dF = dF_lift + dF_drag
         F_tot  += dF
-        # Moment de precession : portance + trainee
         M_prec += np.cross(r_vec, dF)
 
     return F_tot, M_prec
