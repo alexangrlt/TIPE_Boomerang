@@ -10,12 +10,18 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     vitesse  = np.array(vitesse_init,  dtype=float)
     g = np.array([0.0, 0.0, -9.81])
 
-    rot = R.from_euler('y', 20.0, degrees=True)
+    # Orientation initiale : boomerang incline de 20 deg vers la droite
+    # (rotation autour de X, axe de lancer = +X).
+    # Un lanceur droitier tient le boomerang quasi vertical avec un leger tilt
+    # vers la droite : c'est une rotation positive autour de X dans notre repere.
+    rot = R.from_euler('x', 20.0, degrees=True)
 
     I     = config.matrice_inertie()
     I_inv = np.linalg.inv(I)
 
-    omega_monde = rot.apply(np.array([0.0, 0.0, -150.0]))
+    # Spin anti-horaire vu du dessus (+z monde) pour un boomerang droitier.
+    # Le spin est exprime dans le repere corps puis projete en repere monde.
+    omega_monde = rot.apply(np.array([0.0, 0.0, 150.0]))
 
     elements = get_blade_element(config)
 
@@ -29,8 +35,7 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
     step = 0
 
     # Coefficient de couple resistant de rotation (trainee orbitale des pales)
-    # k_drag = 0.5 * rho * Cd * c_moy * n_pales * integrale(r^3 dr) sur [r0, R_pale]
-    # = 0.5 * rho * Cd * c_moy * n_pales * (R_pale^4 - r0^4) / 4
+    # k_drag = 0.5 * rho * Cd * c_moy * n_pales * (R_pale^4 - r0^4) / 4
     Cd_moy  = 0.02
     c_moy   = (config.c_root + config.c_tip) / 2.0
     r0      = 0.005
@@ -56,7 +61,6 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         M_corps     = rot_inv.apply(M_prec)
 
         # Couple resistant physique : trainee de rotation autour de l'axe z corps
-        # M_resist = -k_drag * omega_z * |omega_z|  (quadratique comme la trainee)
         oz             = omega_corps[2]
         M_resist_corps = np.array([0.0, 0.0, -k_drag * oz * abs(oz)])
         M_corps_total  = M_corps + M_resist_corps
@@ -81,7 +85,6 @@ def simulate_projectile(position_init, vitesse_init, config, dt=0.0005, t_max=15
         position += vitesse * dt
 
         step += 1
-        # Renormalisation tous les 5 pas : limite la derive numerique du quaternion
         if step % 5 == 0:
             q = rot.as_quat()
             rot = R.from_quat(q / np.linalg.norm(q))
@@ -107,8 +110,8 @@ def compute_forces_be(elements, v_cm, omega_monde, rot, config):
     Calcul des forces et moments aerodynamiques par la methode des elements de pale (BEM).
 
     - q calculee sur v_proj_mag (vitesse 2D dans le plan de la section)
-    - alpha avec copysign pour conserver le signe physique, borne a [-20, 20] deg
-    - trainee opposee a v_rel_proj (plan section, BEM 2D)
+    - alpha avec copysign, borne a [-20, 20] deg
+    - trainee opposee a v_rel_proj (BEM 2D)
     - moment de precession = portance + trainee
     """
     F_tot  = np.zeros(3)
