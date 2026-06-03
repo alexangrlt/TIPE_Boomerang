@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 
 res = simulate_projectile(
     np.array([0.0, 0.0, 1.5]),
-    np.array([25.0, 0.0, 5.0]),
+    np.array([25.0, 0.0, -1.0]),
     Boomerang_standard,
     dt=0.0001,
     t_max=15,
