@@ -1,16 +1,23 @@
+"""Package principal de modélisation et simulation 3D du boomerang."""
+
 from .basic_simulator import (
-    simulate_projectile,
-    plot_trajectory_3d,
-    plot_rot,
     plot_angles,
+    plot_rot,
+    plot_trajectory_3d,
+    simulate_projectile,
 )
-from .boomerang_config import BoomerangConfig, Boomerang_standard
+from .blade_elements import POLAR_FILE, get_blade_element
+from .boomerang_config import Boomerang_standard, BoomerangConfig
+from .xflr_data import load_data
 
 __all__ = [
-    "simulate_projectile",
-    "plot_trajectory_3d",
-    "plot_rot",
     "BoomerangConfig",
     "Boomerang_standard",
+    "POLAR_FILE",
+    "get_blade_element",
+    "load_data",
     "plot_angles",
+    "plot_rot",
+    "plot_trajectory_3d",
+    "simulate_projectile",
 ]

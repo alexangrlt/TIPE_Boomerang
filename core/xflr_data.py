@@ -1,43 +1,63 @@
+"""Chargement et interpolation des polaires aérodynamiques issues de XFLR5."""
+
+from pathlib import Path
 import numpy as np
 from scipy.interpolate import interp1d
 
 
-def load_data(chemin_d_acces_au_fichier):
+def charger_polaire_xflr5(chemin_fichier: str | Path):
+    """Charge les données polaires XFLR5 (format texte) et retourne
+
+    des interpolateurs Cl(alpha) et Cd(alpha) sécurisés.
+
+    Les angles d'incidence du fichier (en degrés) sont convertis
+    en radians pour homogénéiser avec le reste du code physique.
     """
-    Charge les donnees polaires XFLR5 et retourne des interpolateurs Cl(alpha)
-    et Cd(alpha).
+    path = Path(chemin_fichier)
+    if not path.is_file():
+        raise FileNotFoundError(f"Fichier de polaire introuvable : {path}")
 
-    Attention : les fichiers XFLR5 ont parfois des trous dans la plage d'alpha
-    (ex: donnees absentes entre 3 et 9.5 deg). On remplit ces trous par
-    interpolation lineaire avant de construire l'interpolateur final, pour
-    eviter un saut brutal de Cl qui fausserait le calcul de portance.
-    """
-    data = np.loadtxt(chemin_d_acces_au_fichier, skiprows=11)
+    # Chargement en ignorant les lignes d'en-tête (souvent 11 lignes chez XFLR5)
+    data = np.loadtxt(path, skiprows=11)
 
-    # Recup alpha, Cl, Cd
-    alpha = data[:, 0]
-    Cl    = data[:, 1]
-    Cd    = data[:, 2]
+    # Extraction des colonnes (alpha en deg, Cl, Cd)
+    alpha_deg = data[:, 0]
+    Cl = data[:, 1]
+    Cd = data[:, 2]
 
-    # Tri par alpha croissant (securite)
-    ordre = np.argsort(alpha)
-    alpha = alpha[ordre]
-    Cl    = Cl[ordre]
-    Cd    = Cd[ordre]
+    # Sécurité : tri par angle d'incidence croissant
+    ordre = np.argsort(alpha_deg)
+    alpha_deg = alpha_deg[ordre]
+    Cl = Cl[ordre]
+    Cd = Cd[ordre]
 
-    # Remplissage des trous : on cree une grille reguliere de -5 a 25 deg
-    # par pas de 0.5 deg et on interpole lineairement sur les points existants
-    # avant de construire l'interpolateur final.
-    alpha_dense = np.arange(alpha[0], alpha[-1] + 0.1, 0.5)
-    Cl_dense = np.interp(alpha_dense, alpha, Cl)
-    Cd_dense = np.interp(alpha_dense, alpha, Cd)
+    # Remplissage des trous éventuels via une grille dense en degrés
+    alpha_dense_deg = np.arange(alpha_deg[0], alpha_deg[-1] + 0.1, 0.5)
+    Cl_dense = np.interp(alpha_dense_deg, alpha_deg, Cl)
+    Cd_dense = np.interp(alpha_dense_deg, alpha_deg, Cd)
 
-    # Interpolateurs finaux avec extrapolation constante hors plage
-    Cl_p1d = interp1d(alpha_dense, Cl_dense,
-                      kind='linear', bounds_error=False,
-                      fill_value=(Cl_dense[0], Cl_dense[-1]))
-    Cd_p1d = interp1d(alpha_dense, Cd_dense,
-                      kind='linear', bounds_error=False,
-                      fill_value=(Cd_dense[0], Cd_dense[-1]))
+    # Conversion de la grille d'incidence en radians pour le solveur
+    alpha_dense_rad = np.deg2rad(alpha_dense_deg)
 
-    return Cl_p1d, Cd_p1d
+    # Construction des interpolateurs finaux (en radians)
+    Cl_interpolateur = interp1d(
+        alpha_dense_rad,
+        Cl_dense,
+        kind="linear",
+        bounds_error=False,
+        fill_value=(Cl_dense[0], Cl_dense[-1]),
+    )
+    Cd_interpolateur = interp1d(
+        alpha_dense_rad,
+        Cd_dense,
+        kind="linear",
+        bounds_error=False,
+        fill_value=(Cd_dense[0], Cd_dense[-1]),
+    )
+
+    return Cl_interpolateur, Cd_interpolateur
+
+
+def load_data(chemin_fichier: str | Path):
+    """Alias anglais conservé pour les appelants existants."""
+    return charger_polaire_xflr5(chemin_fichier)
